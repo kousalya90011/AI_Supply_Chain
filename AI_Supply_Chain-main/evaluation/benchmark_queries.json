@@ -1,0 +1,84 @@
+[
+  {
+    "query": "Which suppliers have a high risk of delivery delays?",
+    "expected_intent": "supplier_risk",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which product has the highest sales?",
+    "expected_intent": "sales_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which product sells the most?",
+    "expected_intent": "sales_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "What product has the highest revenue?",
+    "expected_intent": "sales_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which item is most in demand?",
+    "expected_intent": "demand_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "What product do customers need the most?",
+    "expected_intent": "demand_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which product keeps going out of stock?",
+    "expected_intent": "stockout_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which product has the worst stockouts?",
+    "expected_intent": "stockout_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Which product is the riskiest?",
+    "expected_intent": "inventory_risk",
+    "expected_entity_type": null
+  },
+  {
+    "query": "What is the inventory risk for P00003?",
+    "expected_intent": "inventory_risk",
+    "expected_entity_type": "product",
+    "expected_entity_id": "P00003"
+  },
+  {
+    "query": "Why is P00003 risky?",
+    "expected_intent": "inventory_risk",
+    "expected_entity_type": "product",
+    "expected_entity_id": "P00003"
+  },
+  {
+    "query": "What is our top product?",
+    "expected_intent": "ambiguous_product_ranking",
+    "expected_entity_type": null
+  },
+  {
+    "query": "Identify unusual changes in supplier lead times.",
+    "expected_intent": "anomaly_detection",
+    "expected_entity_type": null
+  },
+  {
+    "query": "What are the major supply chain risks?",
+    "expected_intent": "dashboard",
+    "expected_entity_type": null
+  },
+  {
+    "query": "How could a supplier delay affect inventory availability?",
+    "expected_intent": "complex_risk",
+    "expected_entity_type": null
+  },
+  {
+    "query": "If a supplier starts delaying shipments, which products could face stockouts?",
+    "expected_intent": "complex_risk",
+    "expected_entity_type": null
+  }
+]

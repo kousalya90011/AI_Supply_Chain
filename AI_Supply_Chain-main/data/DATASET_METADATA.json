@@ -1,0 +1,20 @@
+{
+  "dataset_type": "Synthetic project dataset",
+  "seed": 42,
+  "purpose": "Demonstration and evaluation of an AI-powered supply-chain risk intelligence system",
+  "core_compatibility": "orders.csv and product_attributes.csv retain an Accenture-style core schema",
+  "synthetic_extensions": [
+    "supplier_id",
+    "order_date",
+    "promised_date",
+    "delivery_date",
+    "lead_time_days",
+    "delay_days",
+    "order_value",
+    "estimated_co2_kg",
+    "demand_daily",
+    "inventory_daily",
+    "disruptions"
+  ],
+  "important_note": "Synthetic extension fields are generated for project capabilities that the original challenge schema does not directly support. They must be labeled synthetic in the project documentation/demo."
+}

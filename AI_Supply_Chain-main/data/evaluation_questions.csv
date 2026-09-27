@@ -1,0 +1,9 @@
+question,entity_type,evaluation_key
+Which 3PL has the highest late-order rate?,3PL,highest_late_rate
+Which route has the highest late-order rate?,ROUTE,highest_route_late_rate
+Which product has the most affected units?,PRODUCT,highest_affected_units
+How many late orders are there?,GLOBAL,late_order_count
+What is the total cost exposure from late orders?,GLOBAL,late_order_cost
+Which logistic hub has the highest late-order rate?,HUB,highest_hub_late_rate
+Which supplier is associated with the highest late-order exposure?,SUPPLIER,highest_supplier_exposure
+What are the top high-risk 3PLs?,3PL,top_risk_3pl
