@@ -399,33 +399,93 @@ function Forecast() {
                 <h2>
                   {selectedProduct} Demand Projection
                 </h2>
+
+                <p className="forecast-card-description">
+                  Expected daily demand across the selected
+                  forecast horizon.
+                </p>
               </div>
 
               <div className="forecast-horizon-badge">
+                <span></span>
                 {forecastRows.length}-DAY FORECAST
               </div>
 
             </div>
 
-            <div className="forecast-chart">
+            <div className="forecast-chart-container">
 
               <ResponsiveContainer
                 width="100%"
-                height={360}
+                height={340}
               >
-                <LineChart data={chartData}>
+                <LineChart
+                  data={chartData}
+                  margin={{
+                    top: 20,
+                    right: 25,
+                    left: 5,
+                    bottom: 15,
+                  }}
+                >
 
                   <CartesianGrid
+                    stroke="#e2e8f0"
                     strokeDasharray="3 3"
+                    vertical={false}
                   />
 
                   <XAxis
                     dataKey="date"
+                    tickLine={false}
+                    axisLine={{
+                      stroke: "#cbd5e1",
+                    }}
+                    tick={{
+                      fill: "#64748b",
+                      fontSize: 11,
+                    }}
+                    tickMargin={12}
                   />
 
-                  <YAxis />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    width={45}
+                    tick={{
+                      fill: "#64748b",
+                      fontSize: 11,
+                    }}
+                    tickMargin={8}
+                    domain={["auto", "auto"]}
+                  />
 
-                  <Tooltip />
+                  <Tooltip
+                    cursor={{
+                      stroke: "#94a3b8",
+                      strokeDasharray: "4 4",
+                    }}
+                    contentStyle={{
+                      border: "1px solid #dbe4ef",
+                      borderRadius: "10px",
+                      background: "#ffffff",
+                      boxShadow:
+                        "0 8px 24px rgba(15, 23, 42, 0.10)",
+                    }}
+                    labelStyle={{
+                      color: "#475569",
+                      fontWeight: 700,
+                      marginBottom: "4px",
+                    }}
+                    itemStyle={{
+                      color: "#2563eb",
+                      fontWeight: 700,
+                    }}
+                    formatter={(value) => [
+                      `${formatDecimal(value, 2)} units`,
+                      "Forecast",
+                    ]}
+                  />
 
                   <Line
                     type="monotone"
@@ -434,9 +494,12 @@ function Forecast() {
                     strokeWidth={3}
                     dot={{
                       r: 4,
+                      strokeWidth: 2,
+                      fill: "#ffffff",
                     }}
                     activeDot={{
-                      r: 6,
+                      r: 7,
+                      strokeWidth: 2,
                     }}
                   />
 
@@ -446,6 +509,7 @@ function Forecast() {
             </div>
 
           </section>
+
 
           {/* TABLE */}
           <section className="forecast-table-card">

@@ -15,11 +15,12 @@ function getEvidenceValue(item, keys) {
     return undefined;
   }
 
-  const record = item.data && typeof item.data === "object"
-    ? item.data
-    : item.raw && typeof item.raw === "object"
-      ? item.raw
-      : item;
+  const record =
+    item.data && typeof item.data === "object"
+      ? item.data
+      : item.raw && typeof item.raw === "object"
+        ? item.raw
+        : item;
 
   for (const key of keys) {
     if (
@@ -49,12 +50,47 @@ function safeNumber(value) {
     : null;
 }
 
+
+function formatPercentage(value) {
+  const number = safeNumber(value);
+
+  if (number === null) {
+    return "—";
+  }
+
+  return `${(number * 100).toFixed(2)}%`;
+}
+
+
+function formatNumber(value, decimals = 2) {
+  const number = safeNumber(value);
+
+  if (number === null) {
+    return "—";
+  }
+
+  return number.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+
+function formatInteger(value) {
+  const number = safeNumber(value);
+
+  if (number === null) {
+    return "—";
+  }
+
+  return Math.round(number).toLocaleString("en-US");
+}
+
+
 function buildEvidenceReason(item) {
   if (!item || typeof item !== "object") {
     return "This record contains operational values that support the current supply-chain conclusion.";
   }
-
-  const record = item.data && typeof item.data === "object" ? item.data : item.raw && typeof item.raw === "object" ? item.raw : item;
 
   const product = getEvidenceValue(item, [
     "product_id",
@@ -81,6 +117,33 @@ function buildEvidenceReason(item) {
     "riskScore",
   ]);
 
+  const stockoutRate = getEvidenceValue(item, [
+    "stockout_rate",
+    "stockoutRate",
+  ]);
+
+  const daysOfCover = getEvidenceValue(item, [
+    "days_of_cover",
+    "daysOfCover",
+  ]);
+
+  const demandPressure = getEvidenceValue(item, [
+    "demand_pressure",
+    "demandPressure",
+  ]);
+
+  const averageDailyDemand = getEvidenceValue(item, [
+    "average_daily_demand",
+    "daily_demand",
+    "averageDailyDemand",
+  ]);
+
+  const avgInventory = getEvidenceValue(item, [
+    "average_inventory",
+    "avg_inventory",
+    "averageInventory",
+  ]);
+
   const unitCost = getEvidenceValue(item, [
     "unit_cost",
     "unitCost",
@@ -98,93 +161,172 @@ function buildEvidenceReason(item) {
     "lateRate",
   ]);
 
+  if (
+    product &&
+    riskLevel !== undefined &&
+    stockoutRate !== undefined
+  ) {
+    return (
+      `${product} is classified as ${String(riskLevel).toUpperCase()} risk. ` +
+      `The evidence shows a ${formatPercentage(stockoutRate)} stockout rate` +
+      `${daysOfCover !== undefined
+        ? ` and ${formatNumber(daysOfCover)} days of inventory cover`
+        : ""
+      }${demandPressure !== undefined
+        ? `, indicating ${formatPercentage(demandPressure)} demand pressure`
+        : ""
+      }.`
+    );
+  }
+
   if (product && supplier) {
-    return `This record links ${product} to supplier ${supplier}${supplierName ? ` (${supplierName})` : ""}, which explains the sourcing relationship behind the result.`;
+    return (
+      `This record links ${product} to supplier ${supplier}` +
+      `${supplierName ? ` (${supplierName})` : ""}, ` +
+      `which explains the sourcing relationship behind the result.`
+    );
+  }
+
+  if (product && averageDailyDemand !== undefined) {
+    return (
+      `This record shows ${product} with an average daily demand of ` +
+      `${formatNumber(averageDailyDemand)} units, which is directly relevant ` +
+      `to the current supply-chain analysis.`
+    );
+  }
+
+  if (product && avgInventory !== undefined) {
+    return (
+      `This record shows ${product} with average inventory of ` +
+      `${formatNumber(avgInventory)} units, which is relevant to its ` +
+      `current inventory position.`
+    );
   }
 
   if (product && unitCost !== undefined) {
-    return `This record shows ${product} at $${safeNumber(unitCost)?.toFixed(2) ?? unitCost} per unit, which is the basis for the product cost ranking.`;
+    return (
+      `This record shows ${product} at ` +
+      `$${formatNumber(unitCost)} per unit, ` +
+      `which supports the product cost analysis.`
+    );
   }
 
   if (product && totalOrders !== undefined) {
-    return `This record shows ${totalOrders} orders for ${product}, which explains the volume driving the order analysis.`;
+    return (
+      `This record shows ${formatInteger(totalOrders)} orders for ${product}, ` +
+      `which explains the order-volume analysis.`
+    );
   }
 
-  if (product && (riskLevel !== undefined || riskScore !== undefined)) {
-    const riskText = riskLevel
-      ? String(riskLevel).toUpperCase()
-      : riskScore !== undefined
-        ? `score ${safeNumber(riskScore)?.toFixed(2) ?? riskScore}`
-        : "risk signal";
-
-    return `This record shows ${product} has a ${riskText} risk signal, driven by the inventory and demand metrics in the underlying evidence.`;
+  if (supplier && lateRate !== undefined) {
+    return (
+      `This supplier record shows a late rate of ` +
+      `${formatPercentage(lateRate)}, which contributes to the supplier ` +
+      `performance assessment.`
+    );
   }
 
   if (riskLevel !== undefined || riskScore !== undefined) {
     const riskText = riskLevel
       ? String(riskLevel).toUpperCase()
       : riskScore !== undefined
-        ? `score ${safeNumber(riskScore)?.toFixed(2) ?? riskScore}`
+        ? `score ${formatNumber(riskScore)}`
         : "risk signal";
 
-    return `This record reflects a ${riskText} signal in the underlying supply-chain data, which is why it is included in the risk assessment.`;
-  }
-
-  if (supplier && lateRate !== undefined) {
-    return `This supplier record shows a late-rate of ${(Number(lateRate) * 100).toFixed(2)}%, which explains the supplier risk conclusion.`;
+    return (
+      `This record reflects a ${riskText} signal in the underlying ` +
+      `supply-chain data, which is why it is included in the analysis.`
+    );
   }
 
   if (product) {
-    return `This record shows ${product} is operating under the current inventory conditions and is directly relevant to the risk conclusion.`;
+    return (
+      `This record contains operational values for ${product} ` +
+      `that are directly relevant to the current analysis.`
+    );
   }
 
   if (supplier) {
-    return `This record reflects the operational status for supplier ${supplier}${supplierName ? ` (${supplierName})` : ""}, which is directly relevant to the current analysis.`;
+    return (
+      `This record contains operational values for supplier ${supplier}` +
+      `${supplierName ? ` (${supplierName})` : ""} ` +
+      `that are relevant to the current analysis.`
+    );
   }
 
-  if (record && typeof record === "object") {
-    const keyFacts = Object.entries(record)
-      .slice(0, 3)
-      .map(([key, value]) => `${key}=${value}`)
-      .join(" | ");
-
-    return keyFacts
-      ? `This record contains the underlying operational values used to support the conclusion: ${keyFacts}.`
-      : "This record contains operational values that support the current supply-chain conclusion.";
-  }
-
-  return "This record contains operational values that support the current supply-chain conclusion.";
+  return (
+    "This record contains operational values that support the " +
+    "current supply-chain conclusion."
+  );
 }
 
+
 function summarizeEvidenceFocus(response, evidence) {
-  if (!response || !Array.isArray(response.requirement_results)) {
+  if (
+    !response ||
+    !Array.isArray(response.requirement_results)
+  ) {
     return null;
   }
 
   const supplierRecord = evidence.find((item) => {
-    const raw = item?.data || item?.raw || {};
-    return raw.product_id && raw.supplier_id;
+    const product = getEvidenceValue(item, [
+      "product_id",
+      "productId",
+    ]);
+
+    const supplier = getEvidenceValue(item, [
+      "supplier_id",
+      "supplierId",
+    ]);
+
+    return product && supplier;
   });
 
   const orderRecord = evidence.find((item) => {
-    const raw = item?.data || item?.raw || {};
-    return raw.total_orders !== undefined || raw.totalOrders !== undefined || raw.order_count !== undefined || raw.orderCount !== undefined;
+    return (
+      getEvidenceValue(item, [
+        "total_orders",
+        "totalOrders",
+        "order_count",
+        "orderCount",
+      ]) !== undefined
+    );
   });
 
   const productId =
-    getEvidenceValue(supplierRecord, ["product_id", "productId"]) ||
-    getEvidenceValue(evidence[0], ["product_id", "productId"]) ||
+    getEvidenceValue(
+      supplierRecord,
+      ["product_id", "productId"]
+    ) ||
+    getEvidenceValue(
+      evidence[0],
+      ["product_id", "productId"]
+    ) ||
     null;
 
-  const supplierId = getEvidenceValue(supplierRecord, ["supplier_id", "supplierId"]) || null;
-  const supplierName = getEvidenceValue(supplierRecord, ["supplier_name", "supplierName"]) || null;
+  const supplierId =
+    getEvidenceValue(
+      supplierRecord,
+      ["supplier_id", "supplierId"]
+    ) || null;
+
+  const supplierName =
+    getEvidenceValue(
+      supplierRecord,
+      ["supplier_name", "supplierName"]
+    ) || null;
+
   const orderCount =
-    getEvidenceValue(orderRecord, ["total_orders", "totalOrders", "order_count", "orderCount"]) ??
-    null;
-
-  if (!productId && !supplierId && orderCount === null) {
-    return null;
-  }
+    getEvidenceValue(
+      orderRecord,
+      [
+        "total_orders",
+        "totalOrders",
+        "order_count",
+        "orderCount",
+      ]
+    ) ?? null;
 
   const parts = [];
 
@@ -193,12 +335,17 @@ function summarizeEvidenceFocus(response, evidence) {
   }
 
   if (supplierId) {
-    const supplierLabel = supplierName ? `${supplierId} (${supplierName})` : supplierId;
+    const supplierLabel = supplierName
+      ? `${supplierId} (${supplierName})`
+      : supplierId;
+
     parts.push(`supplier ${supplierLabel}`);
   }
 
   if (orderCount !== null) {
-    parts.push(`${Number(orderCount).toLocaleString("en-US")} orders`);
+    parts.push(
+      `${formatInteger(orderCount)} orders`
+    );
   }
 
   if (parts.length === 0) {
@@ -208,70 +355,159 @@ function summarizeEvidenceFocus(response, evidence) {
   return `Most relevant evidence chain: ${parts.join(" → ")}`;
 }
 
+
 function buildEvidenceProof(item) {
   if (!item || typeof item !== "object") {
     return "No record values were returned for this evidence item.";
   }
 
-  const raw = item.raw || item;
+  const product = getEvidenceValue(item, [
+    "product_id",
+    "productId",
+  ]);
+
+  const supplier = getEvidenceValue(item, [
+    "supplier_id",
+    "supplierId",
+  ]);
+
+  const supplierName = getEvidenceValue(item, [
+    "supplier_name",
+    "supplierName",
+  ]);
+
+  const riskLevel = getEvidenceValue(item, [
+    "risk_level",
+    "riskLevel",
+  ]);
+
+  const riskScore = getEvidenceValue(item, [
+    "risk_score",
+    "riskScore",
+  ]);
+
+  const stockoutRate = getEvidenceValue(item, [
+    "stockout_rate",
+    "stockoutRate",
+  ]);
+
+  const daysOfCover = getEvidenceValue(item, [
+    "days_of_cover",
+    "daysOfCover",
+  ]);
+
+  const demandPressure = getEvidenceValue(item, [
+    "demand_pressure",
+    "demandPressure",
+  ]);
+
+  const avgInventory = getEvidenceValue(item, [
+    "average_inventory",
+    "avg_inventory",
+    "averageInventory",
+  ]);
+
+  const averageDailyDemand = getEvidenceValue(item, [
+    "average_daily_demand",
+    "daily_demand",
+    "averageDailyDemand",
+  ]);
+
+  const totalDemand = getEvidenceValue(item, [
+    "total_demand",
+    "totalDemand",
+  ]);
+
+  const totalOrders = getEvidenceValue(item, [
+    "total_orders",
+    "totalOrders",
+    "order_count",
+    "orderCount",
+  ]);
+
+  const lateRate = getEvidenceValue(item, [
+    "late_rate",
+    "lateRate",
+  ]);
 
   const facts = [];
-
-  const product = getEvidenceValue(raw, ["product_id", "productId"]);
-  const supplier = getEvidenceValue(raw, ["supplier_id", "supplierId"]);
-  const supplierName = getEvidenceValue(raw, ["supplier_name", "supplierName"]);
-  const riskLevel = getEvidenceValue(raw, ["risk_level", "riskLevel"]);
-  const riskScore = getEvidenceValue(raw, ["risk_score", "riskScore"]);
-  const unitCost = getEvidenceValue(raw, ["unit_cost", "unitCost"]);
-  const totalOrders = getEvidenceValue(raw, ["total_orders", "totalOrders", "order_count", "orderCount"]);
-  const stockoutRate = getEvidenceValue(raw, ["stockout_rate", "stockoutRate"]);
-  const lateRate = getEvidenceValue(raw, ["late_rate", "lateRate"]);
-  const delay = getEvidenceValue(raw, ["avg_delay_days", "average_delay", "average_delay_days", "avgDelayDays"]);
 
   if (product) {
     facts.push(`product ${product}`);
   }
 
   if (supplier) {
-    facts.push(`supplier ${supplier}${supplierName ? ` (${supplierName})` : ""}`);
+    facts.push(
+      `supplier ${supplier}` +
+      `${supplierName ? ` (${supplierName})` : ""}`
+    );
   }
 
   if (riskLevel !== undefined) {
-    facts.push(`risk level ${String(riskLevel).toUpperCase()}`);
+    facts.push(
+      `risk ${String(riskLevel).toUpperCase()}`
+    );
   }
 
   if (riskScore !== undefined) {
-    const score = safeNumber(riskScore);
-    facts.push(`risk score ${score !== null ? score.toFixed(2) : riskScore}`);
-  }
-
-  if (unitCost !== undefined) {
-    const cost = safeNumber(unitCost);
-    facts.push(`unit cost ${cost !== null ? `$${cost.toFixed(2)}` : unitCost}`);
-  }
-
-  if (totalOrders !== undefined) {
-    const orders = safeNumber(totalOrders);
-    facts.push(`total orders ${orders !== null ? orders.toLocaleString("en-US") : totalOrders}`);
+    facts.push(
+      `risk score ${formatNumber(riskScore)}`
+    );
   }
 
   if (stockoutRate !== undefined) {
-    const rate = safeNumber(stockoutRate);
-    facts.push(`stockout rate ${rate !== null ? `${(rate * 100).toFixed(2)}%` : stockoutRate}`);
+    facts.push(
+      `stockout rate ${formatPercentage(stockoutRate)}`
+    );
+  }
+
+  if (daysOfCover !== undefined) {
+    facts.push(
+      `days of cover ${formatNumber(daysOfCover)}`
+    );
+  }
+
+  if (demandPressure !== undefined) {
+    facts.push(
+      `demand pressure ${formatPercentage(demandPressure)}`
+    );
+  }
+
+  if (avgInventory !== undefined) {
+    facts.push(
+      `average inventory ${formatNumber(avgInventory)}`
+    );
+  }
+
+  if (averageDailyDemand !== undefined) {
+    facts.push(
+      `daily demand ${formatNumber(averageDailyDemand)}`
+    );
+  }
+
+  if (totalDemand !== undefined) {
+    facts.push(
+      `total demand ${formatInteger(totalDemand)}`
+    );
+  }
+
+  if (totalOrders !== undefined) {
+    facts.push(
+      `total orders ${formatInteger(totalOrders)}`
+    );
   }
 
   if (lateRate !== undefined) {
-    const rate = safeNumber(lateRate);
-    facts.push(`late rate ${rate !== null ? `${(rate * 100).toFixed(2)}%` : lateRate}`);
-  }
-
-  if (delay !== undefined) {
-    const value = safeNumber(delay);
-    facts.push(`average delay ${value !== null ? `${value.toFixed(2)} days` : delay}`);
+    facts.push(
+      `late rate ${formatPercentage(lateRate)}`
+    );
   }
 
   if (facts.length === 0) {
-    return "This evidence record contains operational values that directly support the current supply-chain conclusion.";
+    return (
+      "This evidence record contains operational values that " +
+      "directly support the current supply-chain conclusion."
+    );
   }
 
   return `Proof data: ${facts.join(" • ")}.`;
@@ -292,6 +528,8 @@ function normalizeEvidence(evidence) {
       return {
         id: index + 1,
         title: `Evidence ${index + 1}`,
+        sourceType: "unknown",
+        retrievalMethod: null,
         riskLevel: null,
         riskScore: null,
         metrics: [],
@@ -300,7 +538,14 @@ function normalizeEvidence(evidence) {
       };
     }
 
-    const record = item.data && typeof item.data === "object" ? item.data : item.raw && typeof item.raw === "object" ? item.raw : item;
+    const record =
+      item.data &&
+        typeof item.data === "object"
+        ? item.data
+        : item.raw &&
+          typeof item.raw === "object"
+          ? item.raw
+          : item;
 
     const provider = getEvidenceValue(item, [
       "three_pl",
@@ -370,6 +615,8 @@ function normalizeEvidence(evidence) {
     const totalOrders = getEvidenceValue(item, [
       "total_orders",
       "totalOrders",
+      "order_count",
+      "orderCount",
     ]);
 
     const totalUnits = getEvidenceValue(item, [
@@ -387,6 +634,11 @@ function normalizeEvidence(evidence) {
       "average_daily_demand",
       "daily_demand",
       "averageDailyDemand",
+    ]);
+
+    const totalDemand = getEvidenceValue(item, [
+      "total_demand",
+      "totalDemand",
     ]);
 
     const zeroInventoryRecords = getEvidenceValue(item, [
@@ -411,6 +663,16 @@ function normalizeEvidence(evidence) {
       "riskReason",
     ]);
 
+    const sourceType =
+      item.source_type ||
+      item.sourceType ||
+      "unknown";
+
+    const retrievalMethod =
+      item.retrieval_method ||
+      item.retrievalMethod ||
+      null;
+
     let title =
       provider ||
       product ||
@@ -420,6 +682,7 @@ function normalizeEvidence(evidence) {
 
     if (product && supplier) {
       title = `${product} → ${supplier}`;
+
       if (supplierName) {
         title += ` (${supplierName})`;
       }
@@ -441,23 +704,23 @@ function normalizeEvidence(evidence) {
     if (supplier) {
       metrics.push({
         label: "Supplier",
-        value: supplierName ? `${supplier} (${supplierName})` : String(supplier),
+        value: supplierName
+          ? `${supplier} (${supplierName})`
+          : String(supplier),
       });
     }
 
     if (unitCost !== undefined) {
-      const cost = safeNumber(unitCost);
       metrics.push({
         label: "Unit Cost",
-        value: cost !== null ? `$${cost.toFixed(2)}` : "—",
+        value: `$${formatNumber(unitCost)}`,
       });
     }
 
     if (costRank !== undefined) {
-      const rank = safeNumber(costRank);
       metrics.push({
         label: "Rank",
-        value: rank !== null ? `#${rank.toFixed(0)}` : "—",
+        value: `#${formatInteger(costRank)}`,
       });
     }
 
@@ -469,134 +732,86 @@ function normalizeEvidence(evidence) {
     }
 
     if (riskScore !== undefined) {
-      const score = safeNumber(riskScore);
-
       metrics.push({
         label: "Risk Score",
-        value:
-          score !== null
-            ? score.toFixed(2)
-            : "—",
+        value: formatNumber(riskScore),
       });
     }
 
     if (lateRate !== undefined) {
-      const rate = safeNumber(lateRate);
-
       metrics.push({
         label: "Late Rate",
-        value:
-          rate !== null
-            ? `${(rate * 100).toFixed(2)}%`
-            : "—",
+        value: formatPercentage(lateRate),
       });
     }
 
     if (delay !== undefined) {
-      const delayValue = safeNumber(delay);
-
       metrics.push({
         label: "Average Delay",
-        value:
-          delayValue !== null
-            ? `${delayValue.toFixed(2)} days`
-            : "—",
+        value: `${formatNumber(delay)} days`,
       });
     }
 
     if (stockoutRate !== undefined) {
-      const rate = safeNumber(stockoutRate);
-
       metrics.push({
         label: "Stockout Rate",
-        value:
-          rate !== null
-            ? `${(rate * 100).toFixed(2)}%`
-            : "—",
+        value: formatPercentage(stockoutRate),
       });
     }
 
     if (daysOfCover !== undefined) {
-      const cover = safeNumber(daysOfCover);
-
       metrics.push({
         label: "Days of Cover",
-        value:
-          cover !== null
-            ? cover.toFixed(2)
-            : "—",
+        value: formatNumber(daysOfCover),
       });
     }
 
     if (demandPressure !== undefined) {
-      const pressure = safeNumber(demandPressure);
-
       metrics.push({
         label: "Demand Pressure",
-        value:
-          pressure !== null
-            ? `${(pressure * 100).toFixed(2)}%`
-            : "—",
+        value: formatPercentage(demandPressure),
+      });
+    }
+
+    if (totalDemand !== undefined) {
+      metrics.push({
+        label: "Total Demand",
+        value: formatInteger(totalDemand),
       });
     }
 
     if (totalOrders !== undefined) {
-      const orders = safeNumber(totalOrders);
-
       metrics.push({
         label: "Orders",
-        value:
-          orders !== null
-            ? orders.toLocaleString("en-US")
-            : "—",
+        value: formatInteger(totalOrders),
       });
     }
 
     if (totalUnits !== undefined) {
-      const units = safeNumber(totalUnits);
-
       metrics.push({
         label: "Units",
-        value:
-          units !== null
-            ? units.toLocaleString("en-US")
-            : "—",
+        value: formatInteger(totalUnits),
       });
     }
 
     if (avgInventory !== undefined) {
-      const inventory = safeNumber(avgInventory);
-
       metrics.push({
         label: "Average Inventory",
-        value:
-          inventory !== null
-            ? inventory.toFixed(2)
-            : "—",
+        value: formatNumber(avgInventory),
       });
     }
 
     if (averageDailyDemand !== undefined) {
-      const demand = safeNumber(averageDailyDemand);
-
       metrics.push({
         label: "Daily Demand",
-        value:
-          demand !== null
-            ? demand.toFixed(2)
-            : "—",
+        value: formatNumber(averageDailyDemand),
       });
     }
 
     if (zeroInventoryRecords !== undefined) {
-      const zeroDays = safeNumber(zeroInventoryRecords);
-
       metrics.push({
         label: "Zero Inventory Days",
-        value:
-          zeroDays !== null
-            ? zeroDays.toLocaleString("en-US")
-            : "—",
+        value: formatInteger(zeroInventoryRecords),
       });
     }
 
@@ -607,6 +822,8 @@ function normalizeEvidence(evidence) {
     return {
       id: index + 1,
       title,
+      sourceType,
+      retrievalMethod,
       riskLevel:
         riskLevel !== undefined
           ? String(riskLevel).toUpperCase()
@@ -730,16 +947,6 @@ function buildSupplierRiskAnswer(
   const summary =
     getRiskSummary(evidence);
 
-  /*
-    Important:
-    LOW is a valid risk classification,
-    but this query asks for suppliers that
-    are actually risk-bearing.
-
-    Therefore we do not describe LOW suppliers
-    as risky.
-  */
-
   if (riskBearing.length === 0) {
     return (
       `No suppliers in the retrieved evidence currently ` +
@@ -748,10 +955,9 @@ function buildSupplierRiskAnswer(
       `The ${evidence.length} retrieved suppliers are ` +
       `currently classified as LOW risk. ` +
       `Risk distribution: ${summary.low} LOW` +
-      `${
-        summary.unknown > 0
-          ? ` and ${summary.unknown} unclassified`
-          : ""
+      `${summary.unknown > 0
+        ? ` and ${summary.unknown} unclassified`
+        : ""
       }.`
     );
   }
@@ -780,11 +986,6 @@ function buildSupplierRiskAnswer(
 ========================================================= */
 
 function deriveEntity(response, evidence) {
-  /*
-    Use backend entity information only when
-    it represents a meaningful specific entity.
-  */
-
   if (
     response?.entity_type &&
     response?.entity_id &&
@@ -805,8 +1006,6 @@ function deriveEntity(response, evidence) {
     };
   }
 
-  /* Product */
-
   if (
     first.raw?.product_id ||
     first.raw?.productId
@@ -826,8 +1025,6 @@ function deriveEntity(response, evidence) {
     };
   }
 
-  /* Supplier */
-
   if (
     first.raw?.supplier_id ||
     first.raw?.supplierId
@@ -846,8 +1043,6 @@ function deriveEntity(response, evidence) {
       id: `${evidence.length} suppliers`,
     };
   }
-
-  /* 3PL */
 
   if (
     first.raw?.three_pl ||
@@ -871,8 +1066,6 @@ function deriveEntity(response, evidence) {
       id: `${evidence.length} providers`,
     };
   }
-
-  /* Route */
 
   if (
     first.raw?.route_id ||
@@ -935,13 +1128,48 @@ function getAgentLabel(agent) {
 
 
 /* =========================================================
+   REASONING MODE
+========================================================= */
+
+function getReasoningMode(response) {
+  if (
+    response?.reasoning_mode
+  ) {
+    return String(
+      response.reasoning_mode
+    )
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (char) =>
+        char.toUpperCase()
+      );
+  }
+
+  if (
+    response?.planner_method ===
+    "deterministic_fallback"
+  ) {
+    return "Deterministic reasoning";
+  }
+
+  if (
+    response?.llm_used === true
+  ) {
+    return "LLM-assisted reasoning";
+  }
+
+  return "Evidence-grounded reasoning";
+}
+
+
+/* =========================================================
    MAIN COMPONENT
 ========================================================= */
 
 function AIQuery() {
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState(null);
-  const [expandedEvidenceId, setExpandedEvidenceId] = useState(null);
+  const [expandedEvidenceId, setExpandedEvidenceId] =
+    useState(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -971,6 +1199,7 @@ function AIQuery() {
       setLoading(true);
       setError("");
       setResponse(null);
+      setExpandedEvidenceId(null);
 
       const result =
         await askSupplyChainQuery(
@@ -992,7 +1221,7 @@ function AIQuery() {
 
       setError(
         err?.response?.data?.detail ||
-          "Unable to process the supply chain query."
+        "Unable to process the supply chain query."
       );
 
     } finally {
@@ -1011,10 +1240,7 @@ function AIQuery() {
     );
 
   const evidenceToDisplay =
-    evidence.length > 0 &&
-    response?.requirement_count > 1
-      ? evidence.slice(0, 2)
-      : evidence.slice(0, 5);
+    evidence.slice(0, 5);
 
   const evidenceFocus =
     summarizeEvidenceFocus(
@@ -1067,36 +1293,54 @@ function AIQuery() {
   const requirementCount =
     Number(
       response?.requirement_count ??
-        response?.requirements?.length ??
-        0
+      response?.requirements?.length ??
+      response?.requirement_results?.length ??
+      0
     ) || 0;
 
   const successfulRequirements =
     Number(
-      response?.successful_requirements ?? 0
+      response?.successful_requirements ??
+      response?.requirement_results?.filter(
+        (item) =>
+          item?.status === "success"
+      )?.length ??
+      0
     ) || 0;
 
-  const modelScore =
-    confidence !== null
-      ? Math.max(0, Math.min(100, confidence * 100))
-      : requirementCount > 0
-        ? Math.max(0, Math.min(100, (successfulRequirements / Math.max(requirementCount, 1)) * 100))
-        : 0;
+  const reasoningMode =
+    getReasoningMode(response);
 
-  const modelGrade =
-    modelScore >= 85
-      ? "High confidence"
-      : modelScore >= 65
-        ? "Moderate confidence"
-        : modelScore >= 40
-          ? "Low confidence"
-          : "Needs review";
+  const requirementsResolved =
+    requirementCount > 0
+      ? `${successfulRequirements}/${requirementCount}`
+      : "—";
+
 
   function toggleEvidence(id) {
-    setExpandedEvidenceId((currentId) => (
-      currentId === id ? null : id
-    ));
+    setExpandedEvidenceId((currentId) =>
+      currentId === id
+        ? null
+        : id
+    );
   }
+
+
+  /* =======================================================
+     SECTION NUMBERING
+  ======================================================= */
+
+  let sectionNumber = 1;
+
+  const getNextSectionNumber = () => {
+    const number = String(
+      sectionNumber
+    ).padStart(2, "0");
+
+    sectionNumber += 1;
+
+    return number;
+  };
 
 
   /* =======================================================
@@ -1154,11 +1398,6 @@ function AIQuery() {
               explanation.
             </p>
 
-          </div>
-
-          <div className="ai-status-badge">
-            <span></span>
-            AI ONLINE
           </div>
 
         </div>
@@ -1300,15 +1539,42 @@ function AIQuery() {
 
 
             <div
-              className={
-                fallbackUsed
-                  ? "ai-response-status fallback"
-                  : "ai-response-status"
-              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
             >
-              {fallbackUsed
-                ? "FALLBACK RESPONSE"
-                : "EVIDENCE ANALYZED"}
+
+              <div
+                className={
+                  fallbackUsed
+                    ? "ai-response-status fallback"
+                    : "ai-response-status"
+                }
+              >
+                {fallbackUsed
+                  ? "FALLBACK RESPONSE"
+                  : "EVIDENCE ANALYZED"}
+              </div>
+
+
+              {response?.retrieval_mode && (
+                <span
+                  className={`ai-retrieval-mode-badge mode-${String(
+                    response.retrieval_mode
+                  ).toLowerCase()}`}
+                  title={
+                    `Retrieval strategy: ${response.retrieval_mode}`
+                  }
+                >
+                  {String(
+                    response.retrieval_mode
+                  ).toUpperCase()} RETRIEVAL
+                </span>
+              )}
+
             </div>
 
           </div>
@@ -1467,7 +1733,7 @@ function AIQuery() {
             <div className="ai-section-title">
 
               <span>
-                01
+                {getNextSectionNumber()}
               </span>
 
               <div>
@@ -1477,83 +1743,153 @@ function AIQuery() {
                 </h3>
 
                 <p>
-                  Real-time model feedback for this
-                  request, based on confidence,
-                  evidence and execution quality.
+                  Execution quality and planner confidence
+                  for this request.
                 </p>
 
               </div>
 
             </div>
 
+
             <div className="ai-assessment-grid">
 
               <div className="ai-assessment-item">
-                <span>MODEL SCORE</span>
+
+                <span>
+                  PLANNER CONFIDENCE
+                </span>
+
                 <strong>
-                  {Number.isFinite(modelScore)
-                    ? `${Math.round(modelScore)}%`
+                  {confidence !== null &&
+                    Number.isFinite(confidence)
+                    ? `${Math.round(
+                      Math.max(
+                        0,
+                        Math.min(
+                          100,
+                          confidence * 100
+                        )
+                      )
+                    )}%`
                     : "—"}
                 </strong>
-                <small>{modelGrade}</small>
+
+                <small>
+                  Confidence in query interpretation
+                </small>
+
               </div>
 
-              <div className="ai-assessment-item">
-                <span>INTENT CONFIDENCE</span>
-                <strong>
-                  {confidence !== null
-                    ? `${(confidence * 100).toFixed(0)}%`
-                    : "—"}
-                </strong>
-                <small>{formatIntent(response.intent)}</small>
-              </div>
 
               <div className="ai-assessment-item">
-                <span>REQUIREMENTS RESOLVED</span>
+
+                <span>
+                  INTENT
+                </span>
+
                 <strong>
-                  {requirementCount > 0
-                    ? `${successfulRequirements}/${requirementCount}`
-                    : "0/0"}
+                  {formatIntent(
+                    response.intent
+                  )}
                 </strong>
+
+                <small>
+                  Primary request classification
+                </small>
+
+              </div>
+
+
+              <div className="ai-assessment-item">
+
+                <span>
+                  REQUIREMENTS RESOLVED
+                </span>
+
+                <strong>
+                  {requirementsResolved}
+                </strong>
+
                 <small>
                   {requirementCount > 0
                     ? "Requirements executed successfully"
                     : "No structured requirements tracked"}
                 </small>
+
               </div>
 
+
               <div className="ai-assessment-item">
-                <span>EVIDENCE RECORDS</span>
-                <strong>{evidence.length}</strong>
+
+                <span>
+                  EVIDENCE RECORDS
+                </span>
+
+                <strong>
+                  {evidence.length}
+                </strong>
+
                 <small>
                   {evidence.length > 0
-                    ? "Operational records supporting the answer"
+                    ? "Authorized evidence supporting the answer"
                     : "No evidence returned"}
                 </small>
+
               </div>
 
             </div>
 
           </div>
 
+
+          {/* =============================================
+              CLARIFICATION
+          ============================================= */}
+
           {isClarificationRequired && (
             <div className="ai-clarification-card">
-              <div className="ai-clarification-icon">?</div>
+
+              <div className="ai-clarification-icon">
+                ?
+              </div>
+
               <div>
-                <strong>Clarification required</strong>
+
+                <strong>
+                  Clarification required
+                </strong>
+
                 <p>
                   {response.answer ||
                     response.message ||
                     "Your request needs a little more detail so the system can target the correct entity, metric, or domain."}
                 </p>
+
                 <ul>
-                  <li>Specify the product, supplier, or time horizon.</li>
-                  <li>Choose a single primary metric if your request mixes several questions.</li>
-                  <li>Try examples such as “Who supplied product P00003?” or “How many total orders from supplier S0066?”</li>
+                  <li>
+                    Specify the product, supplier,
+                    or time horizon.
+                  </li>
+
+                  <li>
+                    Choose a primary metric if
+                    your request mixes several questions.
+                  </li>
+
+                  <li>
+                    Try examples such as
+                    “Who supplied product P00003?”
+                    or
+                    “How many total orders from supplier S0066?”
+                  </li>
                 </ul>
+
               </div>
+
             </div>
           )}
+
 
           {/* =============================================
               ANSWER
@@ -1564,7 +1900,7 @@ function AIQuery() {
             <div className="ai-section-title">
 
               <span>
-                {isClarificationRequired ? "02" : "02"}
+                {getNextSectionNumber()}
               </span>
 
               <div>
@@ -1607,7 +1943,7 @@ function AIQuery() {
               <div className="ai-section-title">
 
                 <span>
-                  02
+                  {getNextSectionNumber()}
                 </span>
 
                 <div>
@@ -1716,9 +2052,7 @@ function AIQuery() {
               <div className="ai-section-title">
 
                 <span>
-                  {supplierRiskQuery
-                    ? "03"
-                    : "02"}
+                  {getNextSectionNumber()}
                 </span>
 
                 <div>
@@ -1738,115 +2072,214 @@ function AIQuery() {
 
 
               {evidenceFocus && (
-                <div className="ai-evidence-focus" style={{ marginBottom: "1rem", padding: "0.75rem 1rem", background: "#f7f9fc", borderRadius: "12px", border: "1px solid #e7edf7", color: "#1f2937" }}>
-                  <strong>Evidence focus:</strong> {evidenceFocus}
+                <div
+                  className="ai-evidence-focus"
+                  style={{
+                    marginBottom: "1rem",
+                    padding: "0.75rem 1rem",
+                    background: "#f7f9fc",
+                    borderRadius: "12px",
+                    border: "1px solid #e7edf7",
+                    color: "#1f2937",
+                  }}
+                >
+                  <strong>
+                    Evidence focus:
+                  </strong>{" "}
+                  {evidenceFocus}
                 </div>
               )}
 
+
               <div className="ai-evidence-list">
 
-                {evidenceToDisplay.map((item) => (
+                {evidenceToDisplay.map(
+                  (item) => (
 
-                  <div
-                    className={`ai-evidence-card ${expandedEvidenceId === item.id ? "expanded" : ""}`}
-                    key={item.id}
-                    onClick={() => toggleEvidence(item.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggleEvidence(item.id);
+                    <div
+                      className={`ai-evidence-card ${
+                        expandedEvidenceId === item.id
+                          ? "expanded"
+                          : ""
+                      }`}
+                      key={item.id}
+                      onClick={() =>
+                        toggleEvidence(item.id)
                       }
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" ||
+                          event.key === " "
+                        ) {
+                          event.preventDefault();
+                          toggleEvidence(item.id);
+                        }
+                      }}
+                      style={{
+                        cursor: "pointer",
+                      }}
+                    >
 
-                    <div className="ai-evidence-top">
+                      <div className="ai-evidence-top">
 
-                      <div>
+                        <div>
 
-                        <span className="ai-evidence-number">
+                          <span className="ai-evidence-number">
 
-                          {String(
-                            item.id
-                          ).padStart(2, "0")}
+                            {String(
+                              item.id
+                            ).padStart(2, "0")}
 
-                        </span>
+                          </span>
 
-                        <strong>
-                          {item.title}
-                        </strong>
+                          <strong>
+                            {item.title}
+                          </strong>
 
-                      </div>
+                        </div>
 
 
-                      {item.riskLevel && (
-
-                        <span
-                          className={`ai-risk-level ai-risk-${String(
-                            item.riskLevel
-                          ).toLowerCase()}`}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
                         >
-                          {item.riskLevel}
-                        </span>
 
-                      )}
+                          {item.retrievalMethod && (
+                            <span
+                              className="ai-evidence-source-tag"
+                              style={{
+                                fontSize: "0.68rem",
+                                fontWeight: 700,
+                                letterSpacing: "0.06em",
+                                textTransform: "uppercase",
+                                padding: "4px 8px",
+                                borderRadius: "999px",
+                                background:
+                                  item.retrievalMethod ===
+                                    "semantic"
+                                    ? "#f3f0ff"
+                                    : "#eef6ff",
+                                color:
+                                  item.retrievalMethod ===
+                                    "semantic"
+                                    ? "#6546a8"
+                                    : "#245b8f",
+                              }}
+                            >
+                              {item.retrievalMethod}
+                            </span>
+                          )}
 
-                    </div>
 
+                          {item.riskLevel && (
 
-                    <div className="ai-evidence-metrics">
-
-                      {item.metrics.map(
-                        (metric, index) => (
-
-                          <div
-                            key={index}
-                          >
-
-                            <span>
-                              {metric.label}
+                            <span
+                              className={`ai-risk-level ai-risk-${String(
+                                item.riskLevel
+                              ).toLowerCase()}`}
+                            >
+                              {item.riskLevel}
                             </span>
 
-                            <strong>
-                              {metric.value}
-                            </strong>
+                          )}
 
-                          </div>
+                        </div>
 
-                        )
+                      </div>
+
+
+                      <div className="ai-evidence-metrics">
+
+                        {item.metrics.map(
+                          (
+                            metric,
+                            index
+                          ) => (
+
+                            <div
+                              key={index}
+                            >
+
+                              <span>
+                                {metric.label}
+                              </span>
+
+                              <strong>
+                                {metric.value}
+                              </strong>
+
+                            </div>
+
+                          )
+                        )}
+
+                      </div>
+
+
+                      <div className="ai-evidence-reason">
+
+                        <span>
+                          WHY THIS MATTERS
+                        </span>
+
+                        <p>
+                          {item.reason}
+                        </p>
+
+                      </div>
+
+
+                      {expandedEvidenceId === item.id && (
+                        <div
+                          className="ai-evidence-proof"
+                          style={{
+                            marginTop: "0.9rem",
+                            paddingTop: "0.9rem",
+                            borderTop:
+                              "1px solid #e7edf7",
+                          }}
+                        >
+
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: "0.72rem",
+                              fontWeight: 700,
+                              letterSpacing:
+                                "0.08em",
+                              color: "#6b7280",
+                              marginBottom:
+                                "0.5rem",
+                            }}
+                          >
+                            PROOF DATA
+                          </span>
+
+                          <p
+                            style={{
+                              margin: 0,
+                              color: "#1f2937",
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            {buildEvidenceProof(
+                              item
+                            )}
+                          </p>
+
+                        </div>
                       )}
 
                     </div>
 
-
-                    <div className="ai-evidence-reason">
-
-                      <span>
-                        WHY THIS MATTERS
-                      </span>
-
-                      <p>
-                        {item.reason}
-                      </p>
-
-                    </div>
-
-                    {expandedEvidenceId === item.id && (
-                      <div className="ai-evidence-proof" style={{ marginTop: "0.9rem", paddingTop: "0.9rem", borderTop: "1px solid #e7edf7" }}>
-                        <span style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.08em", color: "#6b7280", marginBottom: "0.5rem" }}>
-                          PROOF DATA
-                        </span>
-                        <p style={{ margin: 0, color: "#1f2937", lineHeight: 1.6 }}>
-                          {buildEvidenceProof(item)}
-                        </p>
-                      </div>
-                    )}
-
-                  </div>
-
-                ))}
+                  )
+                )}
 
               </div>
 
@@ -1864,9 +2297,7 @@ function AIQuery() {
             <div className="ai-section-title">
 
               <span>
-                {supplierRiskQuery
-                  ? "04"
-                  : "03"}
+                {getNextSectionNumber()}
               </span>
 
               <div>
@@ -1900,9 +2331,21 @@ function AIQuery() {
 
                 <p>
 
-                  The system classified the retrieved
-                  records using their risk levels before
-                  generating the operational response.
+                  The system combines deterministic
+                  supply-chain analytics with retrieved
+                  evidence before producing the operational
+                  response.
+
+                  {reasoningMode && (
+                    <>
+                      {" "}
+                      Current reasoning path:
+                      {" "}
+                      <strong>
+                        {reasoningMode}
+                      </strong>.
+                    </>
+                  )}
 
                   {supplierRiskQuery && (
                     <>
@@ -1936,9 +2379,7 @@ function AIQuery() {
                 <div className="ai-section-title">
 
                   <span>
-                    {supplierRiskQuery
-                      ? "05"
-                      : "04"}
+                    {getNextSectionNumber()}
                   </span>
 
                   <div>
@@ -1960,7 +2401,10 @@ function AIQuery() {
                 <div className="ai-agent-flow">
 
                   {response.agents_used.map(
-                    (agent, index) => (
+                    (
+                      agent,
+                      index
+                    ) => (
 
                       <div
                         className="ai-agent-flow-item"
@@ -1980,13 +2424,13 @@ function AIQuery() {
 
                         {index <
                           response.agents_used.length -
-                            1 && (
+                          1 && (
 
-                          <div className="ai-agent-connector">
-                            →
-                          </div>
+                            <div className="ai-agent-connector">
+                              →
+                            </div>
 
-                        )}
+                          )}
 
                       </div>
 
@@ -2008,7 +2452,6 @@ function AIQuery() {
             response.recommendations
           ) &&
             response.recommendations.length > 0 &&
-
             !(
               supplierRiskQuery &&
               riskBearingEvidence.length === 0
@@ -2019,9 +2462,7 @@ function AIQuery() {
                 <div className="ai-section-title">
 
                   <span>
-                    {supplierRiskQuery
-                      ? "06"
-                      : "05"}
+                    {getNextSectionNumber()}
                   </span>
 
                   <div>
@@ -2060,13 +2501,13 @@ function AIQuery() {
                         <p>
 
                           {typeof recommendation ===
-                          "string"
+                            "string"
                             ? recommendation
                             : recommendation?.text ||
-                              recommendation?.recommendation ||
-                              JSON.stringify(
-                                recommendation
-                              )}
+                            recommendation?.recommendation ||
+                            JSON.stringify(
+                              recommendation
+                            )}
 
                         </p>
 
@@ -2091,9 +2532,7 @@ function AIQuery() {
             <div className="ai-section-title">
 
               <span>
-                {supplierRiskQuery
-                  ? "07"
-                  : "06"}
+                {getNextSectionNumber()}
               </span>
 
               <div>
@@ -2117,15 +2556,16 @@ function AIQuery() {
               <div>
 
                 <span>
-                  Confidence
+                  Planner Confidence
                 </span>
 
                 <strong>
 
-                  {confidence !== null
+                  {confidence !== null &&
+                    Number.isFinite(confidence)
                     ? `${(
-                        confidence * 100
-                      ).toFixed(0)}%`
+                      confidence * 100
+                    ).toFixed(0)}%`
                     : "—"}
 
                 </strong>
@@ -2136,16 +2576,16 @@ function AIQuery() {
               <div>
 
                 <span>
-                  Latency
+                  Execution Latency
                 </span>
 
                 <strong>
 
                   {response.latency_ms !==
-                  undefined
+                    undefined
                     ? `${Number(
-                        response.latency_ms
-                      ).toFixed(0)} ms`
+                      response.latency_ms
+                    ).toFixed(0)} ms`
                     : "—"}
 
                 </strong>
@@ -2165,6 +2605,23 @@ function AIQuery() {
                     ? "Used"
                     : "Not used"}
 
+                </strong>
+
+              </div>
+
+
+              <div>
+
+                <span>
+                  Retrieval
+                </span>
+
+                <strong>
+                  {response?.retrieval_mode
+                    ? String(
+                      response.retrieval_mode
+                    ).toUpperCase()
+                    : "—"}
                 </strong>
 
               </div>

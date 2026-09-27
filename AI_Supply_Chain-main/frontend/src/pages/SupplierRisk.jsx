@@ -13,6 +13,7 @@ import {
 import { getSupplierRiskData } from "../api/riskApi";
 
 import RiskBadge from "../components/RiskBadge";
+import RiskTabs from "../components/RiskTabs";
 import Loading from "../components/Loading";
 import ErrorMessage from "../components/ErrorMessage";
 import EmptyState from "../components/EmptyState";
@@ -141,6 +142,7 @@ function SupplierRisk() {
 
   return (
     <div className="page-container">
+      <RiskTabs />
 
       {/* PAGE HEADER */}
       <section className="page-heading">

@@ -1,20 +1,55 @@
 import { NavLink } from "react-router-dom";
 
-const navigationItems = [
+const adminItems = [
   { path: "/dashboard", icon: "▦", label: "Dashboard" },
-  { path: "/data", icon: "▣", label: "Data" },
-  { path: "/suppliers", icon: "◉", label: "Suppliers" },
-  { path: "/inventory", icon: "▤", label: "Inventory" },
-  { path: "/delivery", icon: "⇢", label: "Delivery" },
-  { path: "/routes", icon: "⌁", label: "Routes" },
-  { path: "/anomalies", icon: "△", label: "Anomalies" },
+  { path: "/users", icon: "👤", label: "Users" },
+  { path: "/suppliers-page", icon: "▣", label: "Suppliers" },
+  { path: "/products", icon: "◫", label: "Products" },
+  { path: "/orders", icon: "◫", label: "Orders" },
+  { path: "/inventory-page", icon: "▤", label: "Inventory" },
+  { path: "/offers", icon: "✦", label: "Offers" },
+  { path: "/risks", icon: "◉", label: "Risks" },
   { path: "/forecast", icon: "↗", label: "Forecast" },
-  { path: "/ai-assistant", icon: "✦", label: "AI Assistant" },
+  { path: "/anomalies", icon: "△", label: "Anomalies" },
+  { path: "/ai-assistant", icon: "✦", label: "AI Query" },
   { path: "/evaluation", icon: "✓", label: "Evaluation" },
   { path: "/audit", icon: "☷", label: "Audit" },
 ];
 
-function Sidebar() {
+const managerItems = [
+  { path: "/dashboard", icon: "▦", label: "Dashboard" },
+  { path: "/suppliers-page", icon: "▣", label: "Suppliers" },
+  { path: "/products", icon: "◫", label: "Products" },
+  { path: "/orders", icon: "◫", label: "Orders" },
+  { path: "/inventory-page", icon: "▤", label: "Inventory" },
+  { path: "/offers", icon: "✦", label: "Offers" },
+  { path: "/risks", icon: "◉", label: "Risks" },
+  { path: "/forecast", icon: "↗", label: "Forecast" },
+  { path: "/anomalies", icon: "△", label: "Anomalies" },
+  { path: "/ai-assistant", icon: "✦", label: "AI Query" },
+];
+
+const supplierItems = [
+  { path: "/my-dashboard", icon: "▦", label: "My Dashboard" },
+  { path: "/my-products", icon: "◫", label: "My Products" },
+  { path: "/my-orders", icon: "◫", label: "My Orders" },
+  { path: "/my-offers", icon: "✦", label: "My Offers" },
+  { path: "/my-performance", icon: "✓", label: "My Performance" },
+  { path: "/ai-assistant", icon: "✦", label: "AI Assistant" },
+];
+
+function Sidebar({ auth }) {
+  const role = auth?.role;
+
+  const navigationItems =
+    role === "SUPPLIER"
+      ? supplierItems
+      : role === "ADMIN"
+        ? adminItems
+        : role === "SUPPLY_CHAIN_MANAGER"
+          ? managerItems
+          : adminItems;
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -54,7 +89,7 @@ function Sidebar() {
         </div>
 
         <div className="sidebar-version">
-          Supply Chain Intelligence
+          {role ? role : "OPERATIONS"}
           <span>v1.0</span>
         </div>
       </div>

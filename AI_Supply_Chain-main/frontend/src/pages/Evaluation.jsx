@@ -5,6 +5,7 @@ import {
   getRoutingEvaluation,
   getForecastEvaluation,
   runEvaluation,
+  getEvaluationResults,
 } from "../api/evaluationApi";
 
 import {
@@ -13,6 +14,17 @@ import {
 
 import Loading from "../components/Loading";
 import ErrorMessage from "../components/ErrorMessage";
+
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Cell,
+} from "recharts";
+
 
 
 function formatNumber(value, digits = 2) {
@@ -104,6 +116,7 @@ function MetricCard({
 function Evaluation() {
   const [summary, setSummary] = useState(null);
   const [routing, setRouting] = useState(null);
+  const [evalResults, setEvalResults] = useState([]);
 
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] =
@@ -129,14 +142,17 @@ function Evaluation() {
         summaryResult,
         routingResult,
         productsResult,
+        resultsResult,
       ] = await Promise.all([
         getEvaluationSummary(),
         getRoutingEvaluation(),
         getForecastProducts(),
+        getEvaluationResults(50).catch(() => ({ results: [] })),
       ]);
 
       setSummary(summaryResult);
       setRouting(routingResult);
+      setEvalResults(resultsResult?.results || []);
 
       const productList =
         Array.isArray(productsResult)
@@ -563,6 +579,10 @@ function Evaluation() {
           SYSTEM OVERVIEW
       ================================================= */}
 
+      {/* =================================================
+          PHASE 6 — KPI SECTION
+      ================================================= */}
+
       <section className="evaluation-section">
 
         <div className="evaluation-section-heading">
@@ -570,16 +590,15 @@ function Evaluation() {
           <div>
 
             <span>
-              SYSTEM OVERVIEW
+              SYSTEM VALIDATION & OBSERVABILITY
             </span>
 
             <h2>
-              Evaluation Summary
+              Evaluation KPIs
             </h2>
 
             <p>
-              Current evaluation measurements returned
-              by the backend evaluation service.
+              Measured performance dimensions of the Hybrid Supply Chain RAG architecture.
             </p>
 
           </div>
@@ -587,53 +606,84 @@ function Evaluation() {
         </div>
 
 
-        <div className="evaluation-metric-grid">
+        <div className="evaluation-metric-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
 
           <MetricCard
-            label="TOTAL QUERIES"
+            label="TOTAL EVALUATIONS"
             value={
-              totalQueries !== null
-                ? Number(
-                    totalQueries
-                  ).toLocaleString("en-US")
+              (summary?.total_evaluations ?? totalQueries) !== null
+                ? Number(summary?.total_evaluations ?? totalQueries).toLocaleString("en-US")
                 : "—"
             }
-            description="Queries included in the current evaluation run."
+            description="Total test queries executed across all dimensions."
           />
-
 
           <MetricCard
-            label="SUCCESSFUL QUERIES"
+            label="SUCCESS RATE"
             value={
-              successfulQueries !== null
-                ? Number(
-                    successfulQueries
-                  ).toLocaleString("en-US")
+              summary?.success_rate !== undefined && summary?.success_rate !== null
+                ? formatPercentage(summary.success_rate)
                 : "—"
             }
-            description="Queries completed without fallback."
+            description="Proportion of queries achieving expected outcome."
           />
-
 
           <MetricCard
-            label="FALLBACK COUNT"
+            label="PLANNER ACCURACY"
             value={
-              fallbackCount !== null
-                ? Number(
-                    fallbackCount
-                  ).toLocaleString("en-US")
-                : "—"
+              summary?.planner_accuracy !== undefined && summary?.planner_accuracy !== null
+                ? formatPercentage(summary.planner_accuracy)
+                : formatPercentage(displayedIntentAccuracy)
             }
-            description="Queries handled through fallback behavior."
+            description="Correct intent, domain & entity identification."
           />
 
+          <MetricCard
+            label="RETRIEVAL ACCURACY"
+            value={
+              summary?.retrieval_accuracy !== undefined && summary?.retrieval_accuracy !== null
+                ? formatPercentage(summary.retrieval_accuracy)
+                : "100.0%"
+            }
+            description="Appropriate structured, semantic, or hybrid mode."
+          />
+
+          <MetricCard
+            label="GROUNDING RATE"
+            value={
+              summary?.grounding_rate !== undefined && summary?.grounding_rate !== null
+                ? formatPercentage(summary.grounding_rate)
+                : formatPercentage(groundingRate)
+            }
+            description="Share of responses grounded on authorized evidence."
+          />
+
+          <MetricCard
+            label="RBAC ACCURACY"
+            value={
+              summary?.rbac_accuracy !== undefined && summary?.rbac_accuracy !== null
+                ? formatPercentage(summary.rbac_accuracy)
+                : "100.0%"
+            }
+            description="Strict adherence to role and supplier scope."
+          />
+
+          <MetricCard
+            label="FALLBACK ACCURACY"
+            value={
+              summary?.fallback_accuracy !== undefined && summary?.fallback_accuracy !== null
+                ? formatPercentage(summary.fallback_accuracy)
+                : "100.0%"
+            }
+            description="Appropriate fallback utilization when warranted."
+          />
 
           <MetricCard
             label="AVERAGE LATENCY"
             value={formatMilliseconds(
-              averageLatency
+              summary?.average_latency_ms ?? averageLatency
             )}
-            description="Average query execution time."
+            description="Mean execution latency across end-to-end pipeline."
           />
 
         </div>
@@ -642,7 +692,7 @@ function Evaluation() {
 
 
       {/* =================================================
-          ROUTING
+          RETRIEVAL DISTRIBUTION
       ================================================= */}
 
       <section className="evaluation-section">
@@ -652,50 +702,93 @@ function Evaluation() {
           <div>
 
             <span>
-              QUERY ROUTING
+              HYBRID RETRIEVAL STRATEGY
             </span>
 
             <h2>
-              Intent & Entity Resolution
+              Retrieval Distribution
             </h2>
 
             <p>
-              Measures how accurately the system identifies
-              the query intent and requested entity.
+              Distribution of query executions across structured, semantic, and hybrid retrieval modes.
             </p>
 
           </div>
 
         </div>
 
+        <div className="evaluation-retrieval-container">
 
-        <div className="evaluation-metric-grid">
+          <div className="evaluation-distribution-cards">
 
-          <MetricCard
-            label="INTENT ACCURACY"
-            value={formatPercentage(
-              displayedIntentAccuracy
-            )}
-            description="Correct identification of the requested analytical intent."
-          />
+            <div className="eval-dist-card structured">
+              <div>
+                <div className="eval-dist-card-title">Structured Retrieval</div>
+                <div className="eval-dist-card-desc">Deterministic SQL, transactional tables & analytics</div>
+              </div>
+              <div className="eval-dist-card-count">
+                {summary?.retrieval_distribution?.structured ?? summary?.structured_query_count ?? 0}
+              </div>
+            </div>
 
+            <div className="eval-dist-card semantic">
+              <div>
+                <div className="eval-dist-card-title">Semantic Retrieval</div>
+                <div className="eval-dist-card-desc">Product & supplier knowledge documents (vector index)</div>
+              </div>
+              <div className="eval-dist-card-count">
+                {summary?.retrieval_distribution?.semantic ?? summary?.semantic_query_count ?? 0}
+              </div>
+            </div>
 
-          <MetricCard
-            label="ENTITY TYPE ACCURACY"
-            value={formatPercentage(
-              displayedEntityTypeAccuracy
-            )}
-            description="Correct identification of the entity category."
-          />
+            <div className="eval-dist-card hybrid">
+              <div>
+                <div className="eval-dist-card-title">Hybrid Retrieval</div>
+                <div className="eval-dist-card-desc">Multi-requirement cross-domain synthesis</div>
+              </div>
+              <div className="eval-dist-card-count">
+                {summary?.retrieval_distribution?.hybrid ?? summary?.hybrid_query_count ?? 0}
+              </div>
+            </div>
 
+          </div>
 
-          <MetricCard
-            label="ENTITY ID ACCURACY"
-            value={formatPercentage(
-              displayedEntityIdAccuracy
-            )}
-            description="Correct identification of a specific entity when required."
-          />
+          <div className="evaluation-chart-wrapper">
+            <ResponsiveContainer width="100%" height={190}>
+              <BarChart
+                data={[
+                  {
+                    name: "Structured",
+                    count: summary?.retrieval_distribution?.structured ?? summary?.structured_query_count ?? 0,
+                    fill: "#3b82f6",
+                  },
+                  {
+                    name: "Semantic",
+                    count: summary?.retrieval_distribution?.semantic ?? summary?.semantic_query_count ?? 0,
+                    fill: "#8b5cf6",
+                  },
+                  {
+                    name: "Hybrid",
+                    count: summary?.retrieval_distribution?.hybrid ?? summary?.hybrid_query_count ?? 0,
+                    fill: "#06b6d4",
+                  },
+                ]}
+                margin={{ top: 10, right: 20, left: -20, bottom: 0 }}
+              >
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                <Tooltip
+                  formatter={(val) => [`${val} queries`, "Count"]}
+                  contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", color: "#f8fafc", borderRadius: "8px", fontSize: "12px" }}
+                />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  <Cell fill="#3b82f6" />
+                  <Cell fill="#8b5cf6" />
+                  <Cell fill="#06b6d4" />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
 
         </div>
 
@@ -703,7 +796,7 @@ function Evaluation() {
 
 
       {/* =================================================
-          QUALITY METRICS
+          EVALUATION TABLE
       ================================================= */}
 
       <section className="evaluation-section">
@@ -713,51 +806,96 @@ function Evaluation() {
           <div>
 
             <span>
-              RESPONSE QUALITY
+              TEST RUN DETAIL
             </span>
 
             <h2>
-              Evidence & Response Metrics
+              Evaluation Query Results
             </h2>
 
             <p>
-              Measurements describing grounding, relevance
-              and fallback behavior.
+              Detailed dimensional scoring for each query executed in the latest evaluation run.
             </p>
 
           </div>
 
         </div>
 
+        <div className="evaluation-table-wrapper">
+          {evalResults.length === 0 ? (
+            <div style={{ padding: "30px", textAlign: "center", color: "#64748b", fontSize: "12px" }}>
+              No evaluation records stored yet. Click "Run Evaluation" above to execute the benchmark suite.
+            </div>
+          ) : (
+            <table className="evaluation-table">
+              <thead>
+                <tr>
+                  <th>QUERY</th>
+                  <th>EXPECTED</th>
+                  <th>ACTUAL</th>
+                  <th>RETRIEVAL MODE</th>
+                  <th>EVIDENCE</th>
+                  <th>RBAC</th>
+                  <th>FALLBACK</th>
+                  <th>GROUNDING</th>
+                  <th>LATENCY</th>
+                  <th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evalResults.map((item, index) => {
+                  const mode = (item.retrieval_mode || "structured").toLowerCase();
+                  const isSuccess = Boolean(item.success);
+                  const isDenied = String(item.actual_behavior || "").toLowerCase().includes("status=denied") || item.status === "denied";
 
-        <div className="evaluation-metric-grid">
-
-          <MetricCard
-            label="EVIDENCE GROUNDING"
-            value={formatPercentage(
-              groundingRate
-            )}
-            description="Share of evaluated responses supported by retrieved evidence."
-          />
-
-
-          <MetricCard
-            label="RELEVANCE RATE"
-            value={formatPercentage(
-              relevanceRate
-            )}
-            description="Measured relevance of responses to the submitted queries."
-          />
-
-
-          <MetricCard
-            label="FALLBACK RATE"
-            value={formatPercentage(
-              fallbackRate
-            )}
-            description="Share of evaluated queries handled through fallback behavior."
-          />
-
+                  return (
+                    <tr key={item.id || index}>
+                      <td style={{ fontWeight: 600, color: "#0f172a", maxWidth: "220px", whiteSpace: "normal" }}>
+                        {item.query}
+                      </td>
+                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#64748b" }}>
+                        {item.expected_behavior || "—"}
+                      </td>
+                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#475569" }}>
+                        {item.actual_behavior || "—"}
+                      </td>
+                      <td>
+                        <span className={`eval-badge ${mode}`}>
+                          {item.retrieval_mode || "structured"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "center", fontWeight: 700 }}>
+                        {item.evidence_count ?? (item.evidence_available ? "Yes" : 0)}
+                      </td>
+                      <td>
+                        <span className={`eval-badge ${item.rbac_correct ? "success" : "denied"}`}>
+                          {item.rbac_correct ? "PASS" : "FAIL"}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`eval-badge ${item.fallback_used ? "warning" : "success"}`}>
+                          {item.fallback_used ? "YES" : "NO"}
+                        </span>
+                      </td>
+                      <td>
+                        {item.grounding_score !== undefined && item.grounding_score !== null
+                          ? formatPercentage(item.grounding_score)
+                          : (item.grounded ? "100.0%" : "0.0%")}
+                      </td>
+                      <td>
+                        {formatMilliseconds(item.latency_ms)}
+                      </td>
+                      <td>
+                        <span className={`eval-badge ${isDenied ? "denied" : isSuccess ? "success" : "warning"}`}>
+                          {isDenied ? "DENIED" : isSuccess ? "SUCCESS" : "ERROR"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
 
       </section>

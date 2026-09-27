@@ -2,13 +2,13 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
-function Layout() {
+function Layout({ auth, onLogout }) {
   return (
     <div className="app-layout">
-      <Sidebar />
+      <Sidebar auth={auth} />
 
       <div className="main-area">
-        <Header />
+        <Header auth={auth} onLogout={onLogout} />
 
         <main className="page-content">
           <Outlet />

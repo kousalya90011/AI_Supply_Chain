@@ -16,6 +16,7 @@ import {
 import { getRouteRiskData } from "../api/riskApi";
 
 import RiskBadge from "../components/RiskBadge";
+import RiskTabs from "../components/RiskTabs";
 import Loading from "../components/Loading";
 import ErrorMessage from "../components/ErrorMessage";
 import EmptyState from "../components/EmptyState";
@@ -322,7 +323,7 @@ function RouteRisk() {
 
   return (
     <div className="page-container route-page">
-
+      <RiskTabs />
 
       {/* =================================================
           PAGE HEADER

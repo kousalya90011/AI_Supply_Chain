@@ -28,8 +28,21 @@ export async function getForecastEvaluation(productId) {
 
 export async function runEvaluation() {
   const response = await apiClient.post(
-    "/api/evaluation/run"
+    "/api/evaluation/run",
+    null,
+    {
+      timeout: 120000,
+    }
   );
 
   return response.data;
 }
+
+export async function getEvaluationResults(limit = 50) {
+  const response = await apiClient.get(
+    `/api/evaluation/results?limit=${limit}`
+  );
+
+  return response.data;
+}
+
