@@ -11,17 +11,28 @@ class EvidenceGroundingEvaluator:
         "stockout_rate",
         "demand_pressure",
         "days_of_cover",
+        "days_cover",
         "average_inventory",
+        "avg_inventory",
         "average_daily_demand",
+        "avg_daily_demand",
         "late_rate",
         "average_delay",
+        "delay_days",
         "anomaly_count",
         "total_records",
         "trend_per_day",
+        "value",
+        "confidence",
     ]
 
     CATEGORICAL_FIELDS = [
         "risk_level",
+        "metric",
+        "entity_id",
+        "entity_type",
+        "source_type",
+        "retrieval_method",
     ]
 
     IMPORTANT_FIELDS = (
@@ -29,63 +40,82 @@ class EvidenceGroundingEvaluator:
         + CATEGORICAL_FIELDS
     )
 
-    # ---------------------------------------------------------
-    # TEXT NORMALIZATION
-    # ---------------------------------------------------------
-
-    def _normalize_text(self, value: Any) -> str:
+    def _normalize_text(
+        self,
+        value: Any,
+    ) -> str:
 
         if value is None:
             return ""
 
-        text = str(value).strip().lower()
+        text = str(
+            value
+        ).strip().lower()
 
         text = re.sub(
             r"\s+",
             " ",
-            text
+            text,
         )
 
         return text
 
-    # ---------------------------------------------------------
-    # NUMBER VARIANTS
-    # ---------------------------------------------------------
-
     def _format_number_variants(
         self,
-        value: Any
+        value: Any,
     ) -> list[str]:
 
         try:
             number = float(value)
-        except (TypeError, ValueError):
+
+        except (
+            TypeError,
+            ValueError,
+        ):
             return []
 
-        variants = set()
+        variants: set[str] = set()
 
-        # Original rounded values
         variants.add(
-            str(round(number, 2))
+            str(
+                round(
+                    number,
+                    2,
+                )
+            )
         )
 
         variants.add(
-            str(round(number, 4))
+            str(
+                round(
+                    number,
+                    4,
+                )
+            )
         )
 
-        # Integer representation
         if number.is_integer():
+
             variants.add(
-                str(int(number))
+                str(
+                    int(number)
+                )
             )
 
-        # Percentage representation
+        # Decimal -> percentage
         if 0 <= number <= 1:
 
-            percentage = number * 100
+            percentage = (
+                number * 100
+            )
 
             variants.add(
-                str(round(percentage, 2))
+                str(
+                    round(
+                        percentage,
+                        2,
+                    )
+                )
             )
 
             variants.add(
@@ -97,173 +127,281 @@ class EvidenceGroundingEvaluator:
             )
 
             if percentage.is_integer():
+
                 variants.add(
                     f"{int(percentage)}%"
                 )
 
-        return list(variants)
-
-    # ---------------------------------------------------------
-    # NUMERIC MATCHING
-    # ---------------------------------------------------------
+        return list(
+            variants
+        )
 
     def _numeric_match(
         self,
         value: Any,
-        answer: str
+        answer: str,
     ) -> bool:
 
-        answer_lower = self._normalize_text(answer)
+        answer_lower = (
+            self._normalize_text(
+                answer
+            )
+        )
 
-        variants = self._format_number_variants(
-            value
+        variants = (
+            self._format_number_variants(
+                value
+            )
         )
 
         for variant in variants:
 
-            # Escape the value so decimal points
-            # are treated literally.
             pattern = re.escape(
                 variant.lower()
             )
 
-            # Avoid matching 2.5 inside 12.5
             pattern = (
-                rf"(?<!\d){pattern}"
+                rf"(?<!\d)"
+                rf"{pattern}"
                 rf"(?!\d)"
             )
 
             if re.search(
                 pattern,
-                answer_lower
+                answer_lower,
             ):
                 return True
 
         return False
 
-    # ---------------------------------------------------------
-    # CATEGORICAL MATCHING
-    # ---------------------------------------------------------
-
     def _categorical_match(
         self,
         value: Any,
-        answer: str
+        answer: str,
     ) -> bool:
 
         if value is None:
             return False
 
-        expected = self._normalize_text(
-            value
+        expected = (
+            self._normalize_text(
+                value
+            )
         )
 
-        answer_lower = self._normalize_text(
-            answer
+        answer_lower = (
+            self._normalize_text(
+                answer
+            )
         )
 
         if not expected:
             return False
 
-        # Direct word/phrase match
+        # Supplier/product IDs such as
+        # S0001 / S001 and P00003
+        # are better checked as substrings
+        # than word-boundary expressions.
+
+        if (
+            expected.startswith("s")
+            or expected.startswith("p")
+        ):
+
+            return expected in answer_lower
+
         pattern = (
-            rf"\b{re.escape(expected)}\b"
+            rf"\b"
+            rf"{re.escape(expected)}"
+            rf"\b"
         )
 
-        if re.search(
-            pattern,
-            answer_lower
-        ):
-            return True
-
-        return False
-
-    # ---------------------------------------------------------
-    # FIELD MATCHING
-    # ---------------------------------------------------------
+        return bool(
+            re.search(
+                pattern,
+                answer_lower,
+            )
+        )
 
     def _field_matches(
         self,
         field: str,
         value: Any,
-        answer: str
+        answer: str,
     ) -> bool:
 
         if field in self.CATEGORICAL_FIELDS:
+
             return self._categorical_match(
                 value=value,
-                answer=answer
+                answer=answer,
             )
 
         return self._numeric_match(
             value=value,
-            answer=answer
+            answer=answer,
         )
 
-    # ---------------------------------------------------------
-    # EVALUATION
-    # ---------------------------------------------------------
+    def _extract_evidence_value(
+        self,
+        item: dict[str, Any],
+    ) -> list[tuple[str, Any]]:
+
+        candidates: list[
+            tuple[str, Any]
+        ] = []
+
+        # ----------------------------------------------------
+        # Direct evidence fields
+        # ----------------------------------------------------
+
+        for field in self.IMPORTANT_FIELDS:
+
+            if field not in item:
+                continue
+
+            value = item.get(
+                field
+            )
+
+            if value is None:
+                continue
+
+            if (
+                isinstance(value, str)
+                and not value.strip()
+            ):
+                continue
+
+            candidates.append(
+                (
+                    field,
+                    value,
+                )
+            )
+
+        # ----------------------------------------------------
+        # Nested data/value
+        # ----------------------------------------------------
+
+        nested = (
+            item.get("data")
+            or item.get("value")
+        )
+
+        if isinstance(
+            nested,
+            dict,
+        ):
+
+            for field in self.IMPORTANT_FIELDS:
+
+                if field not in nested:
+                    continue
+
+                value = nested.get(
+                    field
+                )
+
+                if value is None:
+                    continue
+
+                if (
+                    isinstance(value, str)
+                    and not value.strip()
+                ):
+                    continue
+
+                candidates.append(
+                    (
+                        field,
+                        value,
+                    )
+                )
+
+        return candidates
 
     def evaluate(
         self,
         answer: str,
-        evidence: list[dict[str, Any]]
+        evidence: list[
+            dict[str, Any]
+        ],
     ) -> dict[str, Any]:
 
-        if not answer or not answer.strip() or not evidence:
+        if (
+            not answer
+            or not answer.strip()
+            or not evidence
+        ):
 
             return {
                 "grounded": False,
                 "coverage": 0.0,
                 "checked_fields": [],
                 "matched_fields": [],
-                "missing_fields": []
+                "missing_fields": [],
             }
 
-        checked_fields = []
-        matched_fields = []
-        missing_fields = []
+        checked_fields: list[
+            str
+        ] = []
 
-        # -----------------------------------------------------
-        # Evaluate every evidence item
-        # -----------------------------------------------------
+        matched_fields: list[
+            str
+        ] = []
+
+        missing_fields: list[
+            str
+        ] = []
+
+        # ----------------------------------------------------
+        # Evaluate evidence
+        # ----------------------------------------------------
 
         for item in evidence:
 
-            if not isinstance(item, dict):
+            if not isinstance(
+                item,
+                dict,
+            ):
                 continue
 
-            for field in self.IMPORTANT_FIELDS:
+            candidates = (
+                self._extract_evidence_value(
+                    item
+                )
+            )
 
-                if field not in item:
-                    continue
+            for field, value in candidates:
 
-                value = item[field]
+                checked_fields.append(
+                    field
+                )
 
-                if value is None:
-                    continue
-
-                # Skip empty strings
-                if isinstance(value, str):
-                    if not value.strip():
-                        continue
-
-                checked_fields.append(field)
-
-                matched = self._field_matches(
-                    field=field,
-                    value=value,
-                    answer=answer
+                matched = (
+                    self._field_matches(
+                        field=field,
+                        value=value,
+                        answer=answer,
+                    )
                 )
 
                 if matched:
-                    matched_fields.append(field)
-                else:
-                    missing_fields.append(field)
 
-        # -----------------------------------------------------
+                    matched_fields.append(
+                        field
+                    )
+
+                else:
+
+                    missing_fields.append(
+                        field
+                    )
+
+        # ----------------------------------------------------
         # Remove duplicates
-        # -----------------------------------------------------
+        # ----------------------------------------------------
 
         checked_fields = list(
             dict.fromkeys(
@@ -279,15 +417,17 @@ class EvidenceGroundingEvaluator:
 
         missing_fields = [
             field
-            for field in dict.fromkeys(
+            for field
+            in dict.fromkeys(
                 missing_fields
             )
-            if field not in matched_fields
+            if field
+            not in matched_fields
         ]
 
-        # -----------------------------------------------------
-        # No evaluatable evidence
-        # -----------------------------------------------------
+        # ----------------------------------------------------
+        # No measurable fields
+        # ----------------------------------------------------
 
         if not checked_fields:
 
@@ -302,34 +442,35 @@ class EvidenceGroundingEvaluator:
                 ),
                 "checked_fields": [],
                 "matched_fields": [],
-                "missing_fields": []
+                "missing_fields": [],
             }
 
-        # -----------------------------------------------------
+        # ----------------------------------------------------
         # Coverage
-        # -----------------------------------------------------
+        # ----------------------------------------------------
 
         coverage = (
             len(matched_fields)
             / len(checked_fields)
         )
 
-        # -----------------------------------------------------
-        # Grounding decision
-        #
-        # 50%+ evidence coverage is considered grounded.
-        # -----------------------------------------------------
-
-        grounded = coverage >= 0.50
+        grounded = (
+            coverage >= 0.50
+        )
 
         return {
             "grounded": grounded,
             "coverage": round(
                 coverage,
-                4
+                4,
             ),
-            "checked_fields": checked_fields,
-            "matched_fields": matched_fields,
-            "missing_fields": missing_fields
+            "checked_fields": (
+                checked_fields
+            ),
+            "matched_fields": (
+                matched_fields
+            ),
+            "missing_fields": (
+                missing_fields
+            ),
         }
-    

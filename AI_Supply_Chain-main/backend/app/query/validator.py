@@ -27,6 +27,7 @@ ALLOWED_METRICS = {
     "product_demand",
     "product_inventory",
     "product_delivery",
+    "supplier_offers",
     "summary",
 }
 

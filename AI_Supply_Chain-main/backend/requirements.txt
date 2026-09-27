@@ -13,3 +13,5 @@ openai
 reportlab
 pytest
 httpx
+PyJWT
+passlib[bcrypt]

@@ -8,6 +8,13 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite:///./supply_chain.db"
 
+    JWT_SECRET_KEY: str = "supply-chain-dev-secret"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12
+
+    DEFAULT_ADMIN_USERNAME: str = "admin"
+    DEFAULT_ADMIN_PASSWORD: str = "admin123"
+
     DATA_DIR: str = "../../data"
     RAW_DATA_DIR: str = "../../data/raw"
     PROCESSED_DATA_DIR: str = "../../data/processed"

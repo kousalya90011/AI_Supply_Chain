@@ -7,6 +7,13 @@ from app.query.planner import SemanticQueryPlanner
 from app.query.validator import QueryPlanValidator
 from app.query.factory import create_analytics_registry
 from app.query.executor import QueryExecutor
+from app.query.scope import QueryScope, validate_query_authorization
+from app.services.audit_service import AuditService
+from app.rag.structured_retriever import StructuredRetriever
+from app.rag.semantic_retriever import SemanticRetriever
+from app.rag.schemas import EvidenceItem
+from app.llm.client import LLMClient
+from app.agents.insight_agent import InsightAgent
 
 
 class HybridRAGService:
@@ -108,6 +115,21 @@ class QueryService(HybridRAGService):
             self.registry
         )
 
+        # -----------------------------------------------------
+        # Hybrid RAG Retrievers (Phase 5)
+        # -----------------------------------------------------
+
+        self.structured_retriever = StructuredRetriever(self.registry)
+        self.semantic_retriever = SemanticRetriever()
+        self.llm_client = LLMClient()
+        self.insight_agent = InsightAgent()
+
+        # -----------------------------------------------------
+        # Audit service
+        # -----------------------------------------------------
+
+        self.audit_service = AuditService()
+
     # =========================================================
     # MAIN QUERY
     # =========================================================
@@ -115,6 +137,8 @@ class QueryService(HybridRAGService):
     def query(
         self,
         query: str,
+        user_scope: QueryScope | None = None,
+        db: Any | None = None,
     ) -> dict[str, Any]:
 
         start_time = time.perf_counter()
@@ -129,6 +153,7 @@ class QueryService(HybridRAGService):
                 query=query,
                 start_time=start_time,
                 reason="empty_query",
+                user_scope=user_scope,
             )
 
         cleaned_query = query.strip()
@@ -142,6 +167,8 @@ class QueryService(HybridRAGService):
             plan = self.planner.plan(
                 cleaned_query
             )
+            if hasattr(plan, "original_query"):
+                plan.original_query = cleaned_query
 
             # -------------------------------------------------
             # 2. Validate plan
@@ -152,30 +179,374 @@ class QueryService(HybridRAGService):
             )
 
             # -------------------------------------------------
-            # 3. Execute requirements
+            # 3. Pre-execution RBAC Authorization Check
+            # -------------------------------------------------
+
+            if user_scope:
+                datasets = getattr(self.registry, "datasets", None)
+                is_authorized, reason, target = validate_query_authorization(
+                    user_scope=user_scope,
+                    plan=plan,
+                    datasets=datasets,
+                    db=db,
+                )
+                if not is_authorized:
+                    denied_response = {
+                        "status": "denied",
+                        "authorized_scope": (
+                            f"supplier:{user_scope.supplier_id}"
+                            if getattr(user_scope, "is_supplier", False)
+                            else "global"
+                        ),
+                        "fallback_used": False,
+                        "confidence": 1.0,
+                        "answer": (
+                            f"Access denied: You are not authorized to access information for {reason}."
+                        ),
+                        "evidence": [],
+                        "findings": [],
+                        "combined_findings": [],
+                        "combined_evidence": [],
+                        "agents_used": ["RBAC Authorization Engine"],
+                        "intent": "denied",
+                        "recommendations": [
+                            "You can only query data within your authorized scope."
+                        ],
+                        "query": cleaned_query,
+                        "latency_ms": round(
+                            (time.perf_counter() - start_time) * 1000, 2
+                        ),
+                        "denial_reason": reason,
+                        "requirement_count": 0,
+                        "requirements": [],
+                        "requirement_results": [],
+                        "retrieval_mode": "structured",
+                        "sources": [],
+                    }
+                    self._record_audit(
+                        query=cleaned_query,
+                        plan=plan,
+                        user_scope=user_scope,
+                        response=denied_response,
+                        db=db,
+                    )
+                    return denied_response
+
+            # -------------------------------------------------
+            # 4. Execute requirements (Structured Retrieval)
             # -------------------------------------------------
 
             result = self.executor.execute(
-                plan
+                plan,
+                user_scope=user_scope,
             )
 
             # -------------------------------------------------
-            # 4. Build final response
+            # 5. Semantic / Hybrid Retrieval (Phase 5)
+            # -------------------------------------------------
+            is_semantic_intent = (
+                plan.operation in {"summarize", "overview", "explain", "profile", "impact_analysis"}
+                or plan.metric in {"summary", "risk_profile"}
+                or any(k in cleaned_query.lower() for k in ["summarize", "overview", "what should i know", "tell me about", "profile", "relationship", "why is", "risk profile"])
+            )
+            is_hybrid_query = len(result.get("requirement_results", [])) > 2 or plan.requires_reasoning
+
+            # Ensure structured evidence is present from findings if executor didn't format it
+            structured_evidence = result.get("evidence", [])
+            if not structured_evidence and result.get("findings"):
+                for finding in result["findings"]:
+                    if isinstance(finding, dict):
+                        ev = EvidenceItem(
+                            source_type="analytics",
+                            source_id=f"{plan.entity or 'product'}:{finding.get('product_id') or finding.get('supplier_id') or plan.entity_id}",
+                            entity_type=plan.entity or "product",
+                            entity_id=finding.get("product_id") or finding.get("supplier_id") or plan.entity_id,
+                            metric=plan.metric,
+                            value=finding,
+                            explanation=f"Structured finding for {plan.metric}",
+                            retrieval_method="structured",
+                            confidence=1.0,
+                            data=finding,
+                        )
+                        structured_evidence.append(ev.to_dict())
+
+            semantic_docs = []
+            semantic_evidence = []
+            if is_semantic_intent or is_hybrid_query:
+                target_entity_id = plan.entity_id
+                if not target_entity_id and result.get("findings"):
+                    first_f = result["findings"][0]
+                    if isinstance(first_f, dict):
+                        target_entity_id = first_f.get("supplier_id") or first_f.get("product_id")
+
+                try:
+                    retrieval_res = self.semantic_retriever.retrieve(
+                        query=cleaned_query,
+                        top_k=2 if is_semantic_intent else 1,
+                        user_scope=user_scope,
+                        target_entity_id=target_entity_id,
+                    )
+                    if hasattr(retrieval_res, "documents"):
+                        semantic_docs = retrieval_res.documents
+                        semantic_evidence = retrieval_res.evidence
+                    elif isinstance(retrieval_res, list):
+                        semantic_docs = retrieval_res
+                except Exception:
+                    semantic_docs = []
+                    semantic_evidence = []
+
+            # Defense in depth: supplier scope check on semantic evidence
+            if user_scope and getattr(user_scope, "is_supplier", False):
+                sid = user_scope.supplier_id
+                semantic_evidence = [
+                    ev for ev in semantic_evidence
+                    if (ev.get("entity_type") == "supplier" and ev.get("entity_id") == sid)
+                    or (ev.get("entity_type") == "product" and sid in ev.get("data", {}).get("metadata", {}).get("supplier_ids", []))
+                    or (ev.get("data", {}).get("supplier_id") == sid)
+                ]
+
+            # Merge evidence
+            structured_evidence = result.get("evidence", [])
+            for ev in structured_evidence:
+                if isinstance(ev, dict):
+                    if "retrieval_method" not in ev:
+                        ev["retrieval_method"] = "structured"
+                    if "source_type" not in ev:
+                        ev["source_type"] = "analytics" if ev.get("source") != "supplier_offers" else "database"
+                    if "source_id" not in ev:
+                        ev["source_id"] = f"{ev.get('entity', 'analytics')}:{ev.get('entity_id', '')}"
+                    if "entity_type" not in ev:
+                        ev["entity_type"] = ev.get("entity", "analytics")
+                    if "confidence" not in ev:
+                        ev["confidence"] = 1.0
+
+            combined_evidence = list(structured_evidence) + semantic_evidence
+
+            # Determine retrieval_mode
+            has_structured = len(structured_evidence) > 0
+            has_semantic = len(semantic_evidence) > 0
+            if has_structured and has_semantic:
+                retrieval_mode = "hybrid"
+            elif has_semantic:
+                retrieval_mode = "semantic"
+            else:
+                retrieval_mode = "structured"
+
+            # Determine human-readable sources
+            sources: list[str] = []
+            for ev in combined_evidence:
+                if not isinstance(ev, dict):
+                    continue
+                rm = ev.get("retrieval_method")
+                st = ev.get("source_type")
+                et = ev.get("entity_type")
+                met = str(ev.get("metric") or "")
+                if rm == "semantic" or st == "knowledge_base":
+                    if "Knowledge Base (Semantic Documents)" not in sources:
+                        sources.append("Knowledge Base (Semantic Documents)")
+                elif met in {"supplier_offers"} or st == "database":
+                    if "Operational Database" not in sources:
+                        sources.append("Operational Database")
+                elif et == "supplier" or "supplier" in met or met in {"late_rate", "total_orders"}:
+                    if "Supplier Performance Analytics" not in sources:
+                        sources.append("Supplier Performance Analytics")
+                elif et == "product" or met in {"total_demand", "total_sales", "unit_cost"}:
+                    if "Product Analytics" not in sources:
+                        sources.append("Product Analytics")
+                elif met in {"risk_score", "stockout_rate", "inventory_units", "days_of_cover"}:
+                    if "Inventory Analytics" not in sources:
+                        sources.append("Inventory Analytics")
+            if not sources:
+                sources = ["Deterministic Analytics Engine"]
+
+            result["combined_evidence"] = combined_evidence
+            result["evidence"] = combined_evidence
+            result["retrieval_mode"] = retrieval_mode
+            result["sources"] = sources
+            result["semantic_docs"] = semantic_docs
+
+            # -------------------------------------------------
+            # 6. Build final response
             # -------------------------------------------------
 
-            return self._build_response(
+            response = self._build_response(
                 result=result,
                 query=cleaned_query,
                 start_time=start_time,
+                user_scope=user_scope,
             )
+
+            if user_scope:
+                response["authorized_scope"] = (
+                    f"supplier:{user_scope.supplier_id}"
+                    if getattr(user_scope, "is_supplier", False)
+                    else "global"
+                )
+
+            # -------------------------------------------------
+            # 7. Audit AI query
+            # -------------------------------------------------
+
+            self._record_audit(
+                query=cleaned_query,
+                plan=plan,
+                user_scope=user_scope,
+                response=response,
+                db=db,
+            )
+
+            return response
 
         except Exception as exc:
 
-            return self._fallback_response(
+            fallback = self._fallback_response(
                 query=cleaned_query,
                 start_time=start_time,
                 reason=str(exc),
+                user_scope=user_scope,
             )
+
+            if user_scope:
+                self._record_audit(
+                    query=cleaned_query,
+                    plan=None,
+                    user_scope=user_scope,
+                    response=fallback,
+                    db=db,
+                )
+
+            return fallback
+
+    def _record_audit(
+        self,
+        *,
+        query: str,
+        plan: Any,
+        user_scope: QueryScope | None,
+        response: dict[str, Any],
+        db: Any | None = None,
+    ) -> None:
+        try:
+            status = response.get("status", "unknown")
+            is_authorized = status != "denied"
+            evidence_count = len(
+                response.get("evidence", [])
+                or response.get("combined_evidence", [])
+            )
+            fallback_used = response.get("fallback_used", False)
+            scope_str = (
+                user_scope.supplier_id
+                if (user_scope and getattr(user_scope, "is_supplier", False))
+                else (
+                    getattr(user_scope, "scope_type", "GLOBAL")
+                    if user_scope
+                    else "GLOBAL"
+                )
+            )
+            plan_data = (
+                plan.to_dict()
+                if hasattr(plan, "to_dict")
+                else (str(plan) if plan else None)
+            )
+
+            input_data = {
+                "username": (
+                    getattr(user_scope, "username", "anonymous")
+                    if user_scope
+                    else "anonymous"
+                ),
+                "role": (
+                    getattr(user_scope, "role", "unknown")
+                    if user_scope
+                    else "unknown"
+                ),
+                "supplier_scope": scope_str,
+                "original_query": query,
+                "query_plan": plan_data,
+            }
+
+            output_data = {
+                "status": status,
+                "authorized": is_authorized,
+                "evidence_count": evidence_count,
+                "fallback_used": fallback_used,
+                "llm_used": False,
+                "retrieval_mode": response.get("retrieval_mode", "structured"),
+                "sources": response.get("sources", []),
+            }
+
+            self.audit_service.record(
+                query=query,
+                agent_name="AI_Query_RBAC",
+                input_data=input_data,
+                output_data=output_data,
+                db=db,
+            )
+        except Exception:
+            pass
+
+    def _format_rag_answer(
+        self,
+        *,
+        base_answer: str,
+        evidence: list[dict[str, Any]],
+        sources: list[str],
+        status: str,
+        semantic_docs: list[Any] | None = None,
+    ) -> str:
+        if status in {"denied", "clarification_required", "unsupported"}:
+            return base_answer
+
+        if not evidence and status != "success":
+            return "The available evidence is insufficient to answer the query."
+
+        # If base_answer is empty or generic and semantic documents exist, provide semantic profile
+        if ("no matching" in base_answer.lower() or not base_answer.strip()) and semantic_docs:
+            top_doc = semantic_docs[0]
+            first_line = getattr(top_doc, "content", "").strip().split("\n")[0]
+            base_answer = f"{getattr(top_doc, 'title', 'Profile')}. {first_line}"
+
+        fact_bullets: list[str] = []
+        for ev in evidence[:5]:
+            if not isinstance(ev, dict):
+                continue
+            retrieval_method = ev.get("retrieval_method", "structured")
+            metric = ev.get("metric")
+            entity_id = ev.get("entity_id") or (ev.get("data", {}).get("entity_id") if isinstance(ev.get("data"), dict) else "")
+            val = ev.get("value")
+            if val is None and isinstance(ev.get("data"), dict):
+                val = ev["data"].get("value") or ev["data"].get(metric)
+
+            if retrieval_method == "semantic":
+                title = ev.get("explanation") or f"Knowledge Profile ({entity_id})"
+                content_snippet = str(val or "")[:120].strip()
+                if content_snippet:
+                    fact_bullets.append(f"• {title}: {content_snippet}...")
+            else:
+                if metric and val is not None:
+                    if isinstance(val, float):
+                        val_str = f"{val:,.2f}"
+                    elif isinstance(val, int):
+                        val_str = f"{val:,}"
+                    else:
+                        val_str = str(val)
+                    label = str(metric).replace("_", " ").capitalize()
+                    target = f" ({entity_id})" if entity_id else ""
+                    fact_bullets.append(f"• {label}{target}: {val_str}")
+                elif ev.get("explanation"):
+                    fact_bullets.append(f"• {ev['explanation']}")
+
+        if not fact_bullets:
+            return base_answer
+
+        evidence_section = "\n".join(fact_bullets)
+        source_bullets = "\n".join(f"• {s}" for s in (sources or ["Supply Chain Analytics"]))
+
+        return (
+            f"{base_answer}\n\n"
+            f"Evidence:\n{evidence_section}\n\n"
+            f"Sources:\n{source_bullets}"
+        )
 
     # =========================================================
     # BUILD RESPONSE
@@ -187,6 +558,7 @@ class QueryService(HybridRAGService):
         result: dict[str, Any],
         query: str,
         start_time: float,
+        user_scope: QueryScope | None = None,
     ) -> dict[str, Any]:
 
         status = result.get(
@@ -233,19 +605,33 @@ class QueryService(HybridRAGService):
         fallback_used = status in {
             "fallback",
             "error",
-        }
+            "clarification_required",
+            "clarification",
+            "unsupported",
+        } or bool(result.get("fallback_used", False))
 
         # -----------------------------------------------------
         # Human-readable answer
         # -----------------------------------------------------
 
-        answer = self._generate_answer(
+        base_answer = self._generate_answer(
             result=result,
             findings=findings,
             requirement_results=(
                 requirement_results
             ),
             query=query,
+        )
+
+        sources = result.get("sources", ["Deterministic Analytics Engine"])
+        retrieval_mode = result.get("retrieval_mode", "structured")
+
+        answer = self._format_rag_answer(
+            base_answer=base_answer,
+            evidence=combined_evidence,
+            sources=sources,
+            status=status,
+            semantic_docs=result.get("semantic_docs", []),
         )
 
         # -----------------------------------------------------
@@ -319,6 +705,13 @@ class QueryService(HybridRAGService):
                 else status
             ),
 
+            "authorized_scope": result.get(
+                "authorized_scope",
+                f"supplier:{user_scope.supplier_id}"
+                if (user_scope and getattr(user_scope, "is_supplier", False))
+                else "global",
+            ),
+
             "fallback_used": fallback_used,
 
             "confidence": planner_confidence,
@@ -326,10 +719,14 @@ class QueryService(HybridRAGService):
             "answer": answer,
 
             # -------------------------------------------------
-            # Evidence
+            # Evidence & Phase 5 RAG metadata
             # -------------------------------------------------
 
             "evidence": combined_evidence,
+
+            "retrieval_mode": retrieval_mode,
+
+            "sources": sources,
 
             # -------------------------------------------------
             # Components
@@ -1498,10 +1895,17 @@ class QueryService(HybridRAGService):
         query: str,
         start_time: float,
         reason: str,
+        user_scope: QueryScope | None = None,
     ) -> dict[str, Any]:
 
         return {
             "status": "fallback",
+
+            "authorized_scope": (
+                f"supplier:{user_scope.supplier_id}"
+                if (user_scope and getattr(user_scope, "is_supplier", False))
+                else "global"
+            ),
 
             "fallback_used": True,
 
@@ -1516,6 +1920,10 @@ class QueryService(HybridRAGService):
             ),
 
             "evidence": [],
+
+            "retrieval_mode": "structured",
+
+            "sources": ["Fallback Engine"],
 
             "agents_used": [
                 "Fallback Engine"

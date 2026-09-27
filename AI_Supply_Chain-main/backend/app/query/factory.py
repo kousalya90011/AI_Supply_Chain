@@ -12,6 +12,7 @@ from app.analytics.supplier_risk import SupplierRiskAnalyzer
 from app.analytics.delivery_risk import DeliveryRiskAnalyzer
 from app.analytics.product_cost import ProductCostAnalyzer
 from app.analytics.product_supplier import ProductSupplierAnalyzer
+from app.analytics.offers_analyzer import OffersAnalyzer
 
 from app.query.registry import AnalyticsRegistry
 from app.query.schema import QueryPlan
@@ -164,6 +165,53 @@ class AnalyticsAdapter:
         plan: QueryPlan,
     ) -> pd.DataFrame:
 
+        # -----------------------------------------------------
+        # Extract scope filters
+        # -----------------------------------------------------
+        allowed_pids: set[str] | None = None
+        allowed_sids: set[str] | None = None
+        if plan.filters:
+            pids = plan.filters.get("product_ids") or plan.filters.get("authorized_products")
+            if pids:
+                allowed_pids = {str(p).strip().upper() for p in pids if p is not None}
+            sids = plan.filters.get("supplier_ids")
+            if sids:
+                allowed_sids = {str(s).strip().upper() for s in sids if s is not None}
+            elif plan.filters.get("supplier_id"):
+                allowed_sids = {str(plan.filters.get("supplier_id")).strip().upper()}
+
+        # =====================================================
+        # OFFERS
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            OffersAnalyzer,
+        ):
+            supplier_id = None
+            product_id = None
+            if plan.entity == "supplier" or (plan.entity_id and str(plan.entity_id).upper().startswith("S")):
+                supplier_id = plan.entity_id
+            elif plan.entity == "product" or (plan.entity_id and str(plan.entity_id).upper().startswith("P")):
+                product_id = plan.entity_id
+
+            if plan.filters:
+                if plan.filters.get("supplier_id"):
+                    supplier_id = plan.filters.get("supplier_id")
+                if plan.filters.get("product_id"):
+                    product_id = plan.filters.get("product_id")
+
+            sids_list = list(allowed_sids) if allowed_sids else None
+            pids_list = list(allowed_pids) if allowed_pids else None
+
+            return self.analyzer.analyze(
+                supplier_id=supplier_id,
+                product_id=product_id,
+                supplier_ids=sids_list,
+                product_ids=pids_list,
+                top_n=None,
+            )
+
         # =====================================================
         # PRODUCT SALES
         # =====================================================
@@ -233,6 +281,24 @@ class AnalyticsAdapter:
 
                 return supplier_counts[["supplier_id", "total_orders"]].reset_index(drop=True)
 
+            if orders is not None and not orders.empty:
+                orders = orders.copy()
+                if allowed_sids and "supplier_id" in orders.columns:
+                    orders = orders[orders["supplier_id"].astype(str).str.upper().isin(allowed_sids)].copy()
+                if allowed_pids and "product_id" in orders.columns:
+                    orders = orders[orders["product_id"].astype(str).str.upper().isin(allowed_pids)].copy()
+
+            if orders is None or orders.empty:
+                return pd.DataFrame(
+                    columns=[
+                        "product_id",
+                        "total_sales",
+                        "total_units",
+                        "order_count",
+                        "average_order_value",
+                    ]
+                )
+
             result = self.analyzer.analyze(
                 orders=orders,
                 top_n=None,
@@ -267,6 +333,11 @@ class AnalyticsAdapter:
                 "demand"
             )
 
+            if demand is not None and not demand.empty and allowed_pids:
+                demand = demand[
+                    demand["product_id"].astype(str).str.upper().isin(allowed_pids)
+                ].copy()
+
             return self.analyzer.analyze(
                 demand=demand,
                 top_n=None,
@@ -287,6 +358,11 @@ class AnalyticsAdapter:
                 "inventory"
             )
 
+            if inventory is not None and not inventory.empty and allowed_pids:
+                inventory = inventory[
+                    inventory["product_id"].astype(str).str.upper().isin(allowed_pids)
+                ].copy()
+
             return self.analyzer.analyze(
                 inventory=inventory,
                 top_n=None,
@@ -303,6 +379,17 @@ class AnalyticsAdapter:
             datasets = self._datasets()
 
             products = datasets.get("products")
+
+            if products is not None and not products.empty:
+                products = products.copy()
+                if allowed_sids and "supplier_id" in products.columns:
+                    products = products[
+                        products["supplier_id"].astype(str).str.upper().isin(allowed_sids)
+                    ].copy()
+                if allowed_pids and "product_id" in products.columns:
+                    products = products[
+                        products["product_id"].astype(str).str.upper().isin(allowed_pids)
+                    ].copy()
 
             return self.analyzer.analyze(
                 products=products,
@@ -322,12 +409,13 @@ class AnalyticsAdapter:
             products = datasets.get("products")
             suppliers = datasets.get("suppliers")
 
-            product_ids = None
-            supplier_ids = None
+            product_ids = list(allowed_pids) if allowed_pids else None
+            supplier_ids = list(allowed_sids) if allowed_sids else None
 
-            if plan.filters:
-                product_ids = plan.filters.get("product_ids")
-                supplier_ids = plan.filters.get("supplier_ids")
+            if plan.entity == "supplier" and plan.entity_id:
+                supplier_ids = [str(plan.entity_id).upper()]
+            elif plan.entity == "product" and plan.entity_id:
+                product_ids = [str(plan.entity_id).upper()]
 
             return self.analyzer.analyze(
                 products=products,
@@ -346,9 +434,14 @@ class AnalyticsAdapter:
             InventoryRiskAnalyzer,
         ):
 
-            return self.analyzer.analyze(
+            result = self.analyzer.analyze(
                 top_n=None
             )
+            if result is not None and not result.empty and allowed_pids and "product_id" in result.columns:
+                result = result[
+                    result["product_id"].astype(str).str.upper().isin(allowed_pids)
+                ].copy()
+            return result
 
         # =====================================================
         # SUPPLIER RISK
@@ -364,6 +457,11 @@ class AnalyticsAdapter:
             orders = datasets.get(
                 "orders_extended"
             )
+
+            if orders is not None and not orders.empty and allowed_sids:
+                orders = orders[
+                    orders["supplier_id"].astype(str).str.upper().isin(allowed_sids)
+                ].copy()
 
             return self.analyzer.analyze(
                 orders=orders
@@ -837,6 +935,30 @@ def create_analytics_registry(
             data_service=data_service,
             dataset_name="orders_extended",
             entity_column="three_pl",
+        ),
+    )
+
+    # =========================================================
+    # OFFERS
+    # =========================================================
+
+    registry.register(
+        "supplier_offers",
+        AnalyticsAdapter(
+            analyzer=OffersAnalyzer(),
+            data_service=data_service,
+            dataset_name="supplier_offers",
+            entity_column="supplier_id",
+        ),
+    )
+
+    registry.register(
+        "offers",
+        AnalyticsAdapter(
+            analyzer=OffersAnalyzer(),
+            data_service=data_service,
+            dataset_name="supplier_offers",
+            entity_column="supplier_id",
         ),
     )
 

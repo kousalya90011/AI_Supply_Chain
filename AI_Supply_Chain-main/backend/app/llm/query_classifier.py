@@ -1829,6 +1829,130 @@ Return only JSON.
             }
 
         # -----------------------------------------------------
+        # Offers / bids / quotes
+        # -----------------------------------------------------
+
+        if self._contains_any(
+            query,
+            {"offer", "offers", "bid", "bids", "quote", "quotes"},
+        ):
+            is_supplier = self._contains_any(
+                query,
+                {"supplier", "suppliers", "vendor", "vendors"}
+            ) or bool(re.search(r"\bS\d+\b", query.upper()))
+
+            return {
+                "intent": "offer_analysis",
+                "metric": "supplier_offers",
+                "scope": "offers",
+                "complexity": "simple",
+                "requires_entity": is_supplier,
+                "entity_type": "supplier" if is_supplier else "product",
+                "confidence": 0.85,
+                "requirements": [
+                    {
+                        "domain": "offers",
+                        "operation": "lookup",
+                        "metric": "supplier_offers",
+                        "direction": "none",
+                        "entity": "supplier" if is_supplier else "product",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Semantic summary / overview / explain
+        # -----------------------------------------------------
+
+        if self._contains_any(
+            query,
+            {
+                "summarize",
+                "summary",
+                "overview",
+                "what should i know",
+                "tell me about",
+                "profile",
+                "explain the relationship",
+            },
+        ):
+            has_supplier = self._contains_any(
+                query,
+                {"supplier", "suppliers", "vendor", "vendors"},
+            ) or bool(re.search(r"\bS\d+\b", query.upper()))
+
+            has_product = self._contains_any(
+                query,
+                {"product", "products", "item", "sku"},
+            ) or bool(re.search(r"\bP\d+\b", query.upper()))
+
+            if has_supplier and not has_product:
+                return {
+                    "intent": "supplier_risk",
+                    "metric": "late_rate",
+                    "scope": "supplier",
+                    "complexity": "simple",
+                    "requires_entity": True,
+                    "entity_type": "supplier",
+                    "confidence": 0.88,
+                    "requirements": [
+                        {
+                            "domain": "supplier",
+                            "operation": "summarize",
+                            "metric": "late_rate",
+                            "direction": "descending",
+                            "entity": "supplier",
+                            "entity_id": None,
+                            "depends_on": None,
+                        }
+                    ],
+                }
+
+            if has_product and not has_supplier:
+                return {
+                    "intent": "inventory_risk",
+                    "metric": "risk_score",
+                    "scope": "product",
+                    "complexity": "simple",
+                    "requires_entity": True,
+                    "entity_type": "product",
+                    "confidence": 0.88,
+                    "requirements": [
+                        {
+                            "domain": "inventory",
+                            "operation": "summarize",
+                            "metric": "risk_score",
+                            "direction": "none",
+                            "entity": "product",
+                            "entity_id": None,
+                            "depends_on": None,
+                        }
+                    ],
+                }
+
+            return {
+                "intent": "complex_risk",
+                "metric": "summary",
+                "scope": "supply_chain",
+                "complexity": "complex",
+                "requires_entity": False,
+                "confidence": 0.82,
+                "requirements": [
+                    {
+                        "domain": "supply_chain",
+                        "operation": "explain",
+                        "metric": "summary",
+                        "direction": "none",
+                        "entity": "supply_chain",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
         # Product cost
         # -----------------------------------------------------
 
@@ -2019,6 +2143,126 @@ Return only JSON.
             }
 
         # -----------------------------------------------------
+        # Semantic Summaries / Overviews (Phase 5)
+        # -----------------------------------------------------
+
+        if self._contains_any(
+            query,
+            {
+                "summarize",
+                "summary",
+                "what should i know",
+                "overview",
+                "tell me about",
+                "profile",
+            },
+        ):
+            has_supplier = bool(re.search(r"\bS\d+\b", query.upper())) or "supplier" in query.lower()
+            has_product = bool(re.search(r"\bP\d+\b", query.upper())) or "product" in query.lower()
+            if has_supplier:
+                return {
+                    "intent": "supplier_risk",
+                    "metric": "summary",
+                    "scope": "supplier",
+                    "complexity": "simple",
+                    "requires_entity": True,
+                    "confidence": 0.85,
+                    "requirements": [
+                        {
+                            "domain": "supplier",
+                            "operation": "summarize",
+                            "metric": "late_rate",
+                            "direction": "none",
+                            "entity": "supplier",
+                            "entity_id": None,
+                            "depends_on": None,
+                        }
+                    ],
+                }
+            elif has_product:
+                return {
+                    "intent": "inventory_risk",
+                    "metric": "summary",
+                    "scope": "product",
+                    "complexity": "simple",
+                    "requires_entity": True,
+                    "confidence": 0.85,
+                    "requirements": [
+                        {
+                            "domain": "inventory",
+                            "operation": "summarize",
+                            "metric": "risk_score",
+                            "direction": "none",
+                            "entity": "product",
+                            "entity_id": None,
+                            "depends_on": None,
+                        }
+                    ],
+                }
+            else:
+                return {
+                    "intent": "complex_risk",
+                    "metric": "summary",
+                    "scope": "supply_chain",
+                    "complexity": "complex",
+                    "requires_entity": False,
+                    "confidence": 0.80,
+                    "requirements": [
+                        {
+                            "domain": "supply_chain",
+                            "operation": "impact_analysis",
+                            "metric": "summary",
+                            "direction": "none",
+                            "entity": "supply_chain",
+                            "entity_id": None,
+                            "depends_on": None,
+                        }
+                    ],
+                }
+
+        # -----------------------------------------------------
+        # Inventory Level / Units
+        # -----------------------------------------------------
+
+        if (
+            self._contains_any(
+                query,
+                {
+                    "inventory of",
+                    "current inventory",
+                    "inventory level",
+                    "stock level",
+                    "how much inventory",
+                    "inventory units",
+                },
+            )
+            or (
+                "inventory" in query.lower()
+                and bool(re.search(r"\bP\d+\b", query.upper()))
+                and not self._contains_any(query, {"risk", "stockout", "cover"})
+            )
+        ):
+            return {
+                "intent": "inventory_units",
+                "metric": "inventory_units",
+                "scope": "product",
+                "complexity": "simple",
+                "requires_entity": bool(re.search(r"\bP\d+\b", query.upper())),
+                "confidence": 0.82,
+                "requirements": [
+                    {
+                        "domain": "inventory",
+                        "operation": "lookup" if re.search(r"\bP\d+\b", query.upper()) else "rank",
+                        "metric": "inventory_units",
+                        "direction": "descending",
+                        "entity": "product",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
         # Product supplier lookup
         # -----------------------------------------------------
 
@@ -2041,37 +2285,49 @@ Return only JSON.
                     "supplier of",
                     "supplied",
                     "supplies",
+                    "supply",
                     "provides product",
                     "provide product",
                     "provided product",
                     "provided by",
+                    "products does supplier",
+                    "products supplied",
                 },
             )
-            and self._contains_any(
-                query,
-                {
-                    "product",
-                    "products",
-                    "item",
-                    "items",
-                },
+            and (
+                self._contains_any(
+                    query,
+                    {
+                        "product",
+                        "products",
+                        "item",
+                        "items",
+                    },
+                )
+                or bool(re.search(r"\bP\d+\b", query.upper()))
+                or bool(re.search(r"\bS\d+\b", query.upper()))
+                or "supply" in query.lower()
             )
         ):
+            is_supplier_target = bool(re.search(r"\bS\d+\b", query.upper())) or "supplier" in query.lower()
+            metric_name = "supplier_product" if is_supplier_target else "product_supplier"
+            entity_type = "supplier" if is_supplier_target else "product"
 
             return {
                 "intent": "supplier_relationship_analysis",
-                "metric": "product_supplier",
+                "metric": metric_name,
                 "scope": "supplier",
                 "complexity": "simple",
                 "requires_entity": True,
+                "entity_type": entity_type,
                 "confidence": 0.82,
                 "requirements": [
                     {
                         "domain": "supplier",
                         "operation": "lookup",
-                        "metric": "product_supplier",
+                        "metric": metric_name,
                         "direction": "none",
-                        "entity": "product",
+                        "entity": entity_type,
                         "entity_id": None,
                         "depends_on": None,
                     }
@@ -2083,14 +2339,17 @@ Return only JSON.
         # -----------------------------------------------------
 
         if (
-            self._contains_any(
-                query,
-                {
-                    "supplier",
-                    "suppliers",
-                    "vendor",
-                    "vendors",
-                },
+            (
+                self._contains_any(
+                    query,
+                    {
+                        "supplier",
+                        "suppliers",
+                        "vendor",
+                        "vendors",
+                    },
+                )
+                or bool(re.search(r"\bS\d+\b", query.upper()))
             )
             and self._contains_any(
                 query,
@@ -2130,12 +2389,16 @@ Return only JSON.
         # -----------------------------------------------------
 
         if (
-            self._contains_any(
-                query,
-                {
-                    "supplier",
-                    "suppliers",
-                },
+            (
+                self._contains_any(
+                    query,
+                    {
+                        "supplier",
+                        "suppliers",
+                        "my performance",
+                    },
+                )
+                or bool(re.search(r"\bS\d+\b", query.upper()))
             )
             and self._contains_any(
                 query,
@@ -2387,7 +2650,27 @@ Return only JSON.
 
         primary: dict[str, Any] | None = None
 
-        if self._looks_like_cost_query(query):
+        if self._contains_any(
+            query,
+            {
+                "which products do i supply",
+                "products do i supply",
+                "products i supply",
+                "what products do i supply",
+                "products that i supply",
+            },
+        ):
+            primary = {
+                "domain": "product",
+                "operation": "lookup",
+                "metric": "supplier_product",
+                "direction": "none",
+                "entity": "supplier",
+                "entity_id": None,
+                "depends_on": None,
+            }
+
+        elif self._looks_like_cost_query(query):
 
             primary = {
                 "domain": "product",
@@ -2629,7 +2912,7 @@ Return only JSON.
         # -----------------------------------------------------
 
         if (
-            primary["domain"] == "product"
+            primary["domain"] in {"product", "supplier", "inventory"}
             and self._contains_any(
                 query,
                 {
@@ -2637,6 +2920,7 @@ Return only JSON.
                     "demand for",
                     "customer demand",
                     "customers need",
+                    "their demand",
                 },
             )
         ):
@@ -2645,7 +2929,7 @@ Return only JSON.
                 {
                     "domain": "demand",
                     "operation": "lookup",
-                    "metric": "product_demand",
+                    "metric": "total_demand",
                     "direction": "none",
                     "entity": "product",
                     "entity_id": None,
@@ -2658,7 +2942,7 @@ Return only JSON.
         # -----------------------------------------------------
 
         if (
-            primary["domain"] == "product"
+            primary["domain"] in {"product", "demand", "supplier"}
             and self._contains_any(
                 query,
                 {
@@ -2667,6 +2951,7 @@ Return only JSON.
                     "stock levels",
                     "available stock",
                     "availability",
+                    "their inventory",
                 },
             )
         ):
@@ -2675,7 +2960,7 @@ Return only JSON.
                 {
                     "domain": "inventory",
                     "operation": "lookup",
-                    "metric": "product_inventory",
+                    "metric": "inventory_units",
                     "direction": "none",
                     "entity": "product",
                     "entity_id": None,
@@ -2716,6 +3001,8 @@ Return only JSON.
                     "supplied",
                     "who supplied",
                     "who supplies",
+                    "i supply",
+                    "supply",
                 },
             )
             and self._contains_any(
@@ -2729,6 +3016,7 @@ Return only JSON.
                     "historical orders",
                     "previous orders",
                     "past orders",
+                    "order volume",
                 },
             )
         ):

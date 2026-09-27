@@ -14,38 +14,41 @@ class AuditService:
         query: str,
         agent_name: str,
         input_data: Any,
-        output_data: Any
-    ) -> None:
+        output_data: Any,
+        db: SessionLocal | Any = None
+    ) -> AuditTrace:
 
-        db = SessionLocal()
+        should_close = False
+        active_db = db
+        if active_db is None:
+            active_db = SessionLocal()
+            should_close = True
 
         try:
-
             trace = AuditTrace(
                 query=query,
                 agent_name=agent_name,
                 input_data=json.dumps(
                     input_data,
                     default=str
-                ),
+                ) if not isinstance(input_data, str) else input_data,
                 output_data=json.dumps(
                     output_data,
                     default=str
-                )
+                ) if not isinstance(output_data, str) else output_data
             )
 
-            db.add(trace)
-
-            db.commit()
+            active_db.add(trace)
+            active_db.commit()
+            return trace
 
         except Exception:
-
-            db.rollback()
+            active_db.rollback()
             raise
 
         finally:
-
-            db.close()
+            if should_close:
+                active_db.close()
 
     def get_recent(
         self,

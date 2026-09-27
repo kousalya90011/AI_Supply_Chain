@@ -238,6 +238,23 @@ class SemanticQueryPlanner:
             )
 
         # -----------------------------------------------------
+        # Inventory units / level
+        # -----------------------------------------------------
+
+        if intent in {"inventory_units", "inventory_level"} or metric == "inventory_units":
+            return QueryPlan(
+                domain="inventory",
+                operation="lookup" if entity_id else "rank",
+                metric="inventory_units",
+                direction="descending",
+                entity="product",
+                entity_id=entity_id,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
         # Inventory risk
         # -----------------------------------------------------
 
@@ -275,12 +292,13 @@ class SemanticQueryPlanner:
         # -----------------------------------------------------
 
         if intent == "supplier_relationship_analysis":
+            is_supplier = entity == "supplier" or (entity_id and str(entity_id).upper().startswith("S"))
             return QueryPlan(
-                domain="supplier",
+                domain="product" if is_supplier else "supplier",
                 operation="lookup",
-                metric="product_supplier",
+                metric="supplier_product" if is_supplier else "product_supplier",
                 direction="none",
-                entity="product",
+                entity="supplier" if is_supplier else "product",
                 entity_id=entity_id,
                 confidence=confidence,
                 original_query=query,
@@ -352,6 +370,24 @@ class SemanticQueryPlanner:
                 entity="route",
                 entity_id=entity_id,
                 requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Offers analysis
+        # -----------------------------------------------------
+
+        if intent in {"offer_analysis", "offers", "supplier_offers"}:
+            is_supplier = entity == "supplier" or (entity_id and str(entity_id).upper().startswith("S")) or "supplier" in query.lower()
+            return QueryPlan(
+                domain="offers",
+                operation="lookup",
+                metric="supplier_offers",
+                direction="none",
+                entity="supplier" if is_supplier else "product",
+                entity_id=entity_id,
                 confidence=confidence,
                 original_query=query,
                 planner_method=method,
@@ -987,7 +1023,7 @@ class SemanticQueryPlanner:
     ) -> str | None:
 
         match = re.search(
-            r"\b(P\d{3,}|S\d{3,}|R\d{3,})\b",
+            r"\b(P\d+|S\d+|R\d+)\b",
             query.upper(),
         )
 

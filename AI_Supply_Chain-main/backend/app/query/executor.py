@@ -5,6 +5,7 @@ from typing import Any
 
 from app.query.registry import AnalyticsRegistry
 from app.query.schema import QueryPlan, QueryRequirement
+from app.query.scope import get_supplier_authorized_products, supplier_ids_match
 
 
 class QueryExecutor:
@@ -57,6 +58,7 @@ class QueryExecutor:
     def execute(
         self,
         plan: QueryPlan,
+        user_scope: Any | None = None,
     ) -> dict[str, Any]:
 
         start_time = time.perf_counter()
@@ -124,6 +126,7 @@ class QueryExecutor:
                     requirement=requirement,
                     requirement_index=index,
                     previous_results=requirement_results,
+                    user_scope=user_scope,
                 )
 
                 requirement_results.append(
@@ -243,12 +246,55 @@ class QueryExecutor:
             else None
         )
 
+        # -----------------------------------------------------
+        # Scope enforcement on combined results
+        # -----------------------------------------------------
+        authorized_scope_str = (
+            f"supplier:{user_scope.supplier_id}"
+            if (user_scope and getattr(user_scope, "is_supplier", False))
+            else "global"
+        )
+
+        if user_scope and getattr(user_scope, "is_supplier", False):
+            user_sid = user_scope.supplier_id or ""
+            auth_products = get_supplier_authorized_products(user_sid)
+
+            filtered_comb_findings = []
+            for f in combined_findings:
+                if isinstance(f, dict):
+                    sid = f.get("supplier_id")
+                    if sid and not supplier_ids_match(user_sid, sid):
+                        continue
+                    pid = f.get("product_id")
+                    if pid and str(pid).upper() not in auth_products:
+                        continue
+                    filtered_comb_findings.append(f)
+                else:
+                    filtered_comb_findings.append(f)
+            combined_findings = filtered_comb_findings
+
+            filtered_comb_evidence = []
+            for e in combined_evidence:
+                data = e.get("data") if isinstance(e, dict) else None
+                if isinstance(data, dict):
+                    sid = data.get("supplier_id")
+                    if sid and not supplier_ids_match(user_sid, sid):
+                        continue
+                    pid = data.get("product_id")
+                    if pid and str(pid).upper() not in auth_products:
+                        continue
+                    filtered_comb_evidence.append(e)
+                else:
+                    filtered_comb_evidence.append(e)
+            combined_evidence = filtered_comb_evidence
+
         # =====================================================
         # FINAL RESPONSE
         # =====================================================
 
         return {
             "status": overall_status,
+            "authorized_scope": authorized_scope_str,
 
             "query": plan.original_query,
 
@@ -397,6 +443,7 @@ class QueryExecutor:
         requirement: QueryRequirement,
         requirement_index: int,
         previous_results: list[dict[str, Any]],
+        user_scope: Any | None = None,
     ) -> dict[str, Any]:
 
         # -----------------------------------------------------
@@ -416,7 +463,38 @@ class QueryExecutor:
             parent_plan=plan,
             requirement=requirement,
             dependency_result=dependency_result,
+            user_scope=user_scope,
         )
+
+        if user_scope and getattr(user_scope, "is_supplier", False):
+            user_sid = user_scope.supplier_id or ""
+            auth_products = get_supplier_authorized_products(user_sid)
+            requirement_plan.filters["supplier_id"] = user_sid
+            requirement_plan.filters["supplier_ids"] = [user_sid]
+            requirement_plan.filters["authorized_products"] = list(auth_products)
+
+            if requirement_plan.entity == "supplier":
+                if not requirement_plan.entity_id or supplier_ids_match(user_sid, requirement_plan.entity_id):
+                    requirement_plan.entity_id = user_sid
+                else:
+                    return {
+                        "index": requirement_index,
+                        "status": "denied",
+                        "requirement": self._requirement_to_dict(requirement),
+                        "findings": [],
+                        "evidence": [],
+                        "error": "Supplier outside authorized scope",
+                    }
+            elif requirement_plan.entity == "product" and requirement_plan.entity_id:
+                if str(requirement_plan.entity_id).upper() not in auth_products:
+                    return {
+                        "index": requirement_index,
+                        "status": "denied",
+                        "requirement": self._requirement_to_dict(requirement),
+                        "findings": [],
+                        "evidence": [],
+                        "error": "Product outside authorized supplier scope",
+                    }
 
         # -----------------------------------------------------
         # Validate metric
@@ -496,9 +574,40 @@ class QueryExecutor:
                 requirement.domain,
             )
 
-            enriched_evidence.append(
-                evidence_item
-            )
+        # -----------------------------------------------------
+        # Scope filtering on requirement findings and evidence
+        # -----------------------------------------------------
+        if user_scope and getattr(user_scope, "is_supplier", False):
+            user_sid = user_scope.supplier_id or ""
+            auth_products = get_supplier_authorized_products(user_sid)
+            filtered_findings = []
+            for f in findings:
+                if isinstance(f, dict):
+                    sid = f.get("supplier_id")
+                    if sid and not supplier_ids_match(user_sid, sid):
+                        continue
+                    pid = f.get("product_id")
+                    if pid and str(pid).upper() not in auth_products:
+                        continue
+                    filtered_findings.append(f)
+                else:
+                    filtered_findings.append(f)
+            findings = filtered_findings
+
+            filtered_evidence = []
+            for e in enriched_evidence:
+                data = e.get("data") if isinstance(e, dict) else None
+                if isinstance(data, dict):
+                    sid = data.get("supplier_id")
+                    if sid and not supplier_ids_match(user_sid, sid):
+                        continue
+                    pid = data.get("product_id")
+                    if pid and str(pid).upper() not in auth_products:
+                        continue
+                    filtered_evidence.append(e)
+                else:
+                    filtered_evidence.append(e)
+            enriched_evidence = filtered_evidence
 
         return {
             "index": requirement_index,
@@ -590,6 +699,7 @@ class QueryExecutor:
         parent_plan: QueryPlan,
         requirement: QueryRequirement,
         dependency_result: dict[str, Any] | None,
+        user_scope: Any | None = None,
     ) -> QueryPlan:
 
         filters = dict(
@@ -755,6 +865,29 @@ class QueryExecutor:
                 parent_plan.filters
                 or {}
             )
+
+        if user_scope and getattr(user_scope, "is_supplier", False):
+            user_sid = user_scope.supplier_id or ""
+            auth_products = get_supplier_authorized_products(user_sid)
+            filters["supplier_id"] = user_sid
+            if "supplier_ids" in filters:
+                filters["supplier_ids"] = [
+                    s for s in filters["supplier_ids"]
+                    if supplier_ids_match(user_sid, s)
+                ]
+                if not filters["supplier_ids"]:
+                    filters["supplier_ids"] = [user_sid]
+            else:
+                filters["supplier_ids"] = [user_sid]
+
+            if "product_ids" in filters:
+                filters["product_ids"] = [
+                    p for p in filters["product_ids"]
+                    if str(p).upper() in auth_products
+                ]
+            else:
+                filters["product_ids"] = list(auth_products)
+            filters["authorized_products"] = list(auth_products)
 
         # -----------------------------------------------------
         # Build QueryPlan

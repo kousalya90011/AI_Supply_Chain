@@ -20,6 +20,7 @@ Domain = Literal[
     "order",
     "supply_chain",
     "dashboard",
+    "offers",
 ]
 
 
