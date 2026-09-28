@@ -116,6 +116,8 @@ class LocalVectorStore:
         user_scope: QueryScope | None = None,
         doc_type: str | None = None,
         target_entity_id: str | None = None,
+        topic: str | None = None,
+        risk_level: str | None = None,
     ) -> list[tuple[KnowledgeDocument, float]]:
         """
         Searches the vector store with strict RBAC pre-filtering.
@@ -149,6 +151,14 @@ class LocalVectorStore:
 
             # Optional doc_type filter
             if doc_type and doc.doc_type != doc_type:
+                continue
+
+            # Optional topic filter
+            if topic and doc.metadata.get("topic") != topic:
+                continue
+
+            # Optional risk_level filter
+            if risk_level and doc.metadata.get("risk_level") != risk_level:
                 continue
 
             # Optional target_entity_id filter

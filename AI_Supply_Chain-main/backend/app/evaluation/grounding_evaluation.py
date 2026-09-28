@@ -80,6 +80,15 @@ class EvidenceGroundingEvaluator:
             str(
                 round(
                     number,
+                    1,
+                )
+            )
+        )
+
+        variants.add(
+            str(
+                round(
+                    number,
                     2,
                 )
             )

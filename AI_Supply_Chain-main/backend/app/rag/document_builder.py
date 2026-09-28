@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 class KnowledgeDocumentBuilder:
     """
-    Builds semantic summary knowledge documents for products and suppliers
-    from aggregated deterministic analytics and live transactional database records.
+    Builds semantic section-based knowledge documents for products, suppliers,
+    and cross-functional risks with rich metadata for hybrid semantic retrieval.
     """
 
     def __init__(self, data_service: DataService | None = None) -> None:
@@ -30,15 +30,8 @@ class KnowledgeDocumentBuilder:
         self,
         db: Session | None = None,
     ) -> list[KnowledgeDocument]:
-        """
-        Builds all product and supplier knowledge documents.
-        """
         data = self.data_service.load_data()
         datasets = data.get("datasets", {})
-
-        products_df = datasets.get("products")
-        suppliers_df = datasets.get("suppliers")
-        orders_extended = datasets.get("orders_extended")
 
         should_close = False
         active_db = db
@@ -55,7 +48,10 @@ class KnowledgeDocumentBuilder:
                 datasets=datasets,
                 db=active_db,
             )
-            return product_docs + supplier_docs
+            risk_docs = self.build_risk_documents(
+                datasets=datasets,
+            )
+            return product_docs + supplier_docs + risk_docs
         finally:
             if should_close:
                 active_db.close()
@@ -65,9 +61,6 @@ class KnowledgeDocumentBuilder:
         datasets: dict[str, pd.DataFrame] | None = None,
         db: Session | None = None,
     ) -> list[KnowledgeDocument]:
-        """
-        Generates one semantic knowledge document per product.
-        """
         if datasets is None:
             data = self.data_service.load_data()
             datasets = data.get("datasets", {})
@@ -76,7 +69,6 @@ class KnowledgeDocumentBuilder:
         if products_df is None or products_df.empty:
             return []
 
-        # 1. Run deterministic inventory & risk analyzer
         inv_analyzer = InventoryRiskAnalyzer(self.data_service)
         try:
             inv_risk_df = inv_analyzer.analyze()
@@ -89,7 +81,6 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error computing inventory risk for product docs: {e}")
             inv_by_product = {}
 
-        # 2. Run product sales analyzer
         sales_analyzer = ProductSalesAnalyzer()
         try:
             sales_df = sales_analyzer.analyze(
@@ -104,7 +95,6 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error computing sales for product docs: {e}")
             sales_by_product = {}
 
-        # 3. Product-supplier mappings
         prod_sup_analyzer = ProductSupplierAnalyzer()
         try:
             ps_df = prod_sup_analyzer.analyze(
@@ -123,39 +113,12 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error mapping product suppliers: {e}")
             suppliers_by_product = {}
 
-        # 4. Live transactional data from database
-        db_offers_by_prod: dict[str, dict[str, int]] = {}
-        db_orders_by_prod: dict[str, dict[str, Any]] = {}
-        if db is not None:
-            try:
-                offers = db.query(DBSupplierOffer).all()
-                for off in offers:
-                    pid = str(off.product_id).upper()
-                    st = str(off.status).upper()
-                    db_offers_by_prod.setdefault(
-                        pid, {"total": 0, "PENDING": 0, "ACCEPTED": 0, "REJECTED": 0, "WITHDRAWN": 0}
-                    )
-                    db_offers_by_prod[pid]["total"] += 1
-                    if st in db_offers_by_prod[pid]:
-                        db_offers_by_prod[pid][st] += 1
-
-                db_orders = db.query(DBOrder).all()
-                for ord_item in db_orders:
-                    pid = str(ord_item.product_id).upper()
-                    db_orders_by_prod.setdefault(pid, {"count": 0, "units": 0})
-                    db_orders_by_prod[pid]["count"] += 1
-                    db_orders_by_prod[pid]["units"] += int(ord_item.quantity or 0)
-            except Exception as e:
-                logger.warning(f"Error reading transactional DB state for products: {e}")
-
-        # 5. Generate documents
         documents: list[KnowledgeDocument] = []
         for _, prod_row in products_df.iterrows():
             pid = str(prod_row["product_id"]).upper()
             category = str(prod_row.get("category", "General"))
             unit_cost = float(prod_row.get("unit_cost", 0.0))
 
-            # Suppliers for this product
             sups = suppliers_by_product.get(pid, [])
             sup_ids = [s["supplier_id"] for s in sups]
             if not sup_ids and "supplier_id" in prod_row and pd.notna(prod_row["supplier_id"]):
@@ -163,10 +126,8 @@ class KnowledgeDocumentBuilder:
                 sup_ids = [fallback_sid]
                 sups = [{"supplier_id": fallback_sid, "supplier_name": fallback_sid}]
 
-            sup_names = [s.get("supplier_name", s["supplier_id"]) for s in sups]
             sup_desc = ", ".join(f"{s['supplier_name']} ({s['supplier_id']})" for s in sups) if sups else "Unassigned"
 
-            # Inventory & Risk stats
             inv_stats = inv_by_product.get(pid, {})
             avg_inv = float(inv_stats.get("avg_inventory", 0.0))
             zero_inv_days = int(inv_stats.get("zero_inventory_days", 0))
@@ -177,46 +138,16 @@ class KnowledgeDocumentBuilder:
             risk_level = str(inv_stats.get("risk_level", "LOW"))
             risk_reason = str(inv_stats.get("risk_reason", f"Risk score {risk_score:.1f}"))
 
-            # Sales stats
             sales_stats = sales_by_product.get(pid, {})
             total_demand = float(sales_stats.get("total_demand", avg_daily_demand * 30))
             total_sales = float(sales_stats.get("total_sales", 0.0))
 
-            # Transactional stats
-            tx_offers = db_offers_by_prod.get(
-                pid, {"total": 0, "PENDING": 0, "ACCEPTED": 0, "REJECTED": 0, "WITHDRAWN": 0}
-            )
-            tx_orders = db_orders_by_prod.get(pid, {"count": 0, "units": 0})
-
-            # Build semantic content summary
-            content_lines = [
-                f"Product {pid} Summary & Operational Risk Profile:",
-                f"- Category: {category}",
-                f"- Unit Cost: ${unit_cost:.2f}",
-                f"- Suppliers: {sup_desc}",
-                f"- Demand Metrics: Total demand is {total_demand:,.0f} units with average daily demand of {avg_daily_demand:.1f} units.",
-                f"- Inventory Status: Average inventory is {avg_inv:,.1f} units. Days of inventory cover: {days_of_cover:.1f} days.",
-                f"- Stockout & Reliability: Zero-inventory days recorded: {zero_inv_days} days, giving a stockout rate of {stockout_rate * 100:.2f}%.",
-                f"- Supply Chain Risk: Evaluated at {risk_score:.1f}/100 ({risk_level} Risk). Reason: {risk_reason}.",
-            ]
-
-            if tx_offers["total"] > 0:
-                content_lines.append(
-                    f"- Live Supplier Offers: {tx_offers['total']} offers ({tx_offers['PENDING']} pending, "
-                    f"{tx_offers['ACCEPTED']} accepted, {tx_offers['REJECTED']} rejected)."
-                )
-            if tx_orders["count"] > 0:
-                content_lines.append(
-                    f"- Live Transactional Orders: {tx_orders['count']} orders totaling {tx_orders['units']:,} units."
-                )
-
-            summary_text = "\n".join(content_lines)
-
-            metadata = {
+            base_meta = {
                 "document_type": "product",
                 "entity_id": pid,
-                "supplier_ids": sup_ids,
+                "product_id": pid,
                 "product_ids": [pid],
+                "supplier_ids": sup_ids,
                 "category": category,
                 "unit_cost": unit_cost,
                 "risk_score": risk_score,
@@ -225,18 +156,58 @@ class KnowledgeDocumentBuilder:
                 "avg_inventory": round(avg_inv, 2),
                 "days_of_cover": round(days_of_cover, 2),
                 "total_demand": round(total_demand, 2),
-                "source": "hybrid",
+                "source": "product_analytics",
             }
 
-            doc = KnowledgeDocument(
-                doc_id=f"product:{pid}",
+            # Chunk 1: Product Profile
+            documents.append(KnowledgeDocument(
+                doc_id=f"product:{pid}:profile",
                 doc_type="product",
                 entity_id=pid,
-                title=f"Product {pid} ({category})",
-                content=summary_text,
-                metadata=metadata,
-            )
-            documents.append(doc)
+                title=f"Product {pid} Profile ({category})",
+                content=f"Product {pid} belongs to the {category} category with a standard unit cost of ${unit_cost:.2f}.",
+                metadata={**base_meta, "topic": "product_profile"},
+            ))
+
+            # Chunk 2: Supplier Relationship
+            documents.append(KnowledgeDocument(
+                doc_id=f"product:{pid}:suppliers",
+                doc_type="product",
+                entity_id=pid,
+                title=f"Product {pid} Supplier Relationships",
+                content=f"Product {pid} is supplied by: {sup_desc}.",
+                metadata={**base_meta, "topic": "supplier_relationship"},
+            ))
+
+            # Chunk 3: Demand Metrics
+            documents.append(KnowledgeDocument(
+                doc_id=f"product:{pid}:demand",
+                doc_type="product",
+                entity_id=pid,
+                title=f"Product {pid} Demand Profile",
+                content=f"Product {pid} records average daily demand of {avg_daily_demand:.1f} units with total recorded demand of {total_demand:,.0f} units and cumulative sales of ${total_sales:,.2f}.",
+                metadata={**base_meta, "topic": "demand_metrics"},
+            ))
+
+            # Chunk 4: Inventory Status
+            documents.append(KnowledgeDocument(
+                doc_id=f"product:{pid}:inventory",
+                doc_type="product",
+                entity_id=pid,
+                title=f"Product {pid} Inventory Status",
+                content=f"Product {pid} maintains an average inventory of {avg_inv:,.1f} units, providing an estimated {days_of_cover:.1f} days of inventory cover.",
+                metadata={**base_meta, "topic": "inventory_status"},
+            ))
+
+            # Chunk 5: Stockout Exposure
+            documents.append(KnowledgeDocument(
+                doc_id=f"product:{pid}:stockout",
+                doc_type="product",
+                entity_id=pid,
+                title=f"Product {pid} Stockout Exposure & Risk",
+                content=f"Product {pid} has recorded {zero_inv_days} zero-inventory stockout days, yielding a stockout frequency of {stockout_rate * 100:.2f}%. Assigned risk level is {risk_level} ({risk_score:.1f}/100) due to {risk_reason}.",
+                metadata={**base_meta, "topic": "stockout_exposure"},
+            ))
 
         return documents
 
@@ -245,9 +216,6 @@ class KnowledgeDocumentBuilder:
         datasets: dict[str, pd.DataFrame] | None = None,
         db: Session | None = None,
     ) -> list[KnowledgeDocument]:
-        """
-        Generates one semantic knowledge document per supplier.
-        """
         if datasets is None:
             data = self.data_service.load_data()
             datasets = data.get("datasets", {})
@@ -259,7 +227,6 @@ class KnowledgeDocumentBuilder:
         if suppliers_df is None or suppliers_df.empty:
             return []
 
-        # 1. Run supplier risk analyzer
         sup_analyzer = SupplierRiskAnalyzer()
         try:
             if orders_extended is not None and not orders_extended.empty:
@@ -275,7 +242,6 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error computing supplier risk: {e}")
             sup_risk_by_id = {}
 
-        # 2. Map products supplied
         prod_sup_analyzer = ProductSupplierAnalyzer()
         try:
             ps_df = prod_sup_analyzer.analyze(
@@ -291,32 +257,6 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error mapping supplier products: {e}")
             products_by_supplier = {}
 
-        # 3. Live transactional data from database
-        db_offers_by_sup: dict[str, dict[str, int]] = {}
-        db_orders_by_sup: dict[str, dict[str, Any]] = {}
-        if db is not None:
-            try:
-                offers = db.query(DBSupplierOffer).all()
-                for off in offers:
-                    sid = str(off.supplier_id).upper()
-                    st = str(off.status).upper()
-                    db_offers_by_sup.setdefault(
-                        sid, {"total": 0, "PENDING": 0, "ACCEPTED": 0, "REJECTED": 0, "WITHDRAWN": 0}
-                    )
-                    db_offers_by_sup[sid]["total"] += 1
-                    if st in db_offers_by_sup[sid]:
-                        db_offers_by_sup[sid][st] += 1
-
-                db_orders = db.query(DBOrder).all()
-                for ord_item in db_orders:
-                    sid = str(ord_item.supplier_id).upper()
-                    db_orders_by_sup.setdefault(sid, {"count": 0, "units": 0})
-                    db_orders_by_sup[sid]["count"] += 1
-                    db_orders_by_sup[sid]["units"] += int(ord_item.quantity or 0)
-            except Exception as e:
-                logger.warning(f"Error reading transactional DB state for suppliers: {e}")
-
-        # 4. Generate documents
         documents: list[KnowledgeDocument] = []
         for _, sup_row in suppliers_df.iterrows():
             sid = str(sup_row["supplier_id"]).upper()
@@ -327,46 +267,23 @@ class KnowledgeDocumentBuilder:
             prods = products_by_supplier.get(sid, [])
             prod_desc = f"{len(prods)} products (" + ", ".join(prods[:5]) + ("..." if len(prods) > 5 else "") + ")" if prods else "None"
 
-            # Performance stats
             perf = sup_risk_by_id.get(sid, {})
             total_orders = int(perf.get("total_orders", 0))
             total_units = int(perf.get("total_units", 0))
             late_orders = int(perf.get("late_orders", 0))
             late_rate = float(perf.get("late_rate", 0.0))
+            avg_delay = float(perf.get("avg_delay", 0.0))
+            avg_lead = float(perf.get("avg_lead_time", 12.0))
+            std_lead = float(perf.get("std_lead_time", 3.0))
+            disr_rate = float(perf.get("disruption_rate", 0.05))
             risk_score = float(perf.get("risk_score", 20.0))
             risk_level = str(perf.get("risk_level", "LOW"))
             risk_reason = str(perf.get("risk_reason", f"Late rate: {late_rate * 100:.1f}%"))
 
-            # Transactional stats
-            tx_offers = db_offers_by_sup.get(
-                sid, {"total": 0, "PENDING": 0, "ACCEPTED": 0, "REJECTED": 0, "WITHDRAWN": 0}
-            )
-            tx_orders = db_orders_by_sup.get(sid, {"count": 0, "units": 0})
-
-            content_lines = [
-                f"Supplier {sid} ({sname}) Performance & Relationship Profile:",
-                f"- Region & Classification: Operating in {region} as a Tier {tier} supplier.",
-                f"- Products Supplied: Supplies {prod_desc}.",
-                f"- Order History: {total_orders:,} total orders executed with {total_units:,} units delivered.",
-                f"- Delivery Reliability: {late_orders:,} late orders resulting in a late delivery rate of {late_rate * 100:.2f}%.",
-                f"- Supplier Risk Assessment: Score {risk_score:.1f}/100 categorized as {risk_level} Risk. Details: {risk_reason}.",
-            ]
-
-            if tx_offers["total"] > 0:
-                content_lines.append(
-                    f"- Active Offer Proposals: {tx_offers['total']} offers ({tx_offers['PENDING']} pending review, "
-                    f"{tx_offers['ACCEPTED']} accepted, {tx_offers['REJECTED']} rejected)."
-                )
-            if tx_orders["count"] > 0:
-                content_lines.append(
-                    f"- Recent Direct Orders: {tx_orders['count']} orders totaling {tx_orders['units']:,} units."
-                )
-
-            summary_text = "\n".join(content_lines)
-
-            metadata = {
+            base_meta = {
                 "document_type": "supplier",
                 "entity_id": sid,
+                "supplier_id": sid,
                 "supplier_ids": [sid],
                 "product_ids": prods,
                 "supplier_name": sname,
@@ -375,22 +292,139 @@ class KnowledgeDocumentBuilder:
                 "total_orders": total_orders,
                 "total_units": total_units,
                 "late_rate": round(late_rate, 4),
+                "avg_delay": round(avg_delay, 2),
+                "avg_lead_time": round(avg_lead, 1),
+                "std_lead_time": round(std_lead, 1),
+                "disruption_rate": round(disr_rate, 4),
                 "risk_score": risk_score,
                 "risk_level": risk_level,
-                "pending_offers": tx_offers["PENDING"],
-                "accepted_offers": tx_offers["ACCEPTED"],
-                "rejected_offers": tx_offers["REJECTED"],
-                "source": "hybrid",
+                "source": "supplier_analytics",
             }
 
-            doc = KnowledgeDocument(
-                doc_id=f"supplier:{sid}",
+            # Chunk 1: Supplier Identity and Profile
+            documents.append(KnowledgeDocument(
+                doc_id=f"supplier:{sid}:profile",
                 doc_type="supplier",
                 entity_id=sid,
-                title=f"Supplier {sid} - {sname}",
-                content=summary_text,
-                metadata=metadata,
-            )
-            documents.append(doc)
+                title=f"Supplier {sid} ({sname}) Profile",
+                content=f"Supplier {sid} ({sname}) operates in region {region} as a Tier {tier} partner. It is responsible for supplying {prod_desc}.",
+                metadata={**base_meta, "topic": "identity_profile"},
+            ))
+
+            # Chunk 2: Delivery Performance
+            documents.append(KnowledgeDocument(
+                doc_id=f"supplier:{sid}:delivery",
+                doc_type="supplier",
+                entity_id=sid,
+                title=f"Supplier {sid} Delivery Performance",
+                content=f"Supplier {sid} has handled {total_orders:,} total purchase orders ({total_units:,} units). {late_orders:,} orders arrived late, resulting in a late-delivery rate of {late_rate * 100:.1f}% and an average delivery delay of {avg_delay:.1f} days.",
+                metadata={**base_meta, "topic": "delivery_performance"},
+            ))
+
+            # Chunk 3: Lead-Time Behavior
+            documents.append(KnowledgeDocument(
+                doc_id=f"supplier:{sid}:lead_time",
+                doc_type="supplier",
+                entity_id=sid,
+                title=f"Supplier {sid} Lead-Time Characteristics",
+                content=f"Supplier {sid} demonstrates an average fulfillment lead time of {avg_lead:.1f} days, with lead-time standard deviation of {std_lead:.1f} days reflecting delivery timeline variability.",
+                metadata={**base_meta, "topic": "lead_time_behavior"},
+            ))
+
+            # Chunk 4: Disruption History
+            documents.append(KnowledgeDocument(
+                doc_id=f"supplier:{sid}:disruption",
+                doc_type="supplier",
+                entity_id=sid,
+                title=f"Supplier {sid} Disruption Exposure",
+                content=f"Supplier {sid} has recorded a disruption rate of {disr_rate * 100:.1f}% across historical orders, impacting fulfillment continuity.",
+                metadata={**base_meta, "topic": "disruption_history"},
+            ))
+
+            # Chunk 5: Risk Assessment
+            documents.append(KnowledgeDocument(
+                doc_id=f"supplier:{sid}:risk",
+                doc_type="supplier",
+                entity_id=sid,
+                title=f"Supplier {sid} Risk Assessment",
+                content=f"Supplier {sid} has an overall risk score of {risk_score:.1f}/100 and is classified as {risk_level} Risk. Operational drivers: {risk_reason}.",
+                metadata={**base_meta, "topic": "risk_assessment"},
+            ))
+
+        return documents
+
+    def build_risk_documents(
+        self,
+        datasets: dict[str, pd.DataFrame] | None = None,
+    ) -> list[KnowledgeDocument]:
+        """
+        Creates semantic documents describing supply chain risk definitions,
+        operational metrics, and standard mitigation procedures.
+        """
+        risk_definitions = [
+            {
+                "topic": "supplier_delivery_risk",
+                "title": "Supplier Delivery Risk Framework",
+                "content": (
+                    "Supplier delivery risk evaluates the probability and impact of fulfillment delays. "
+                    "Key supporting metrics include late-delivery rate, average delay days, lead-time standard deviation, "
+                    "and volume exposure. High delivery risk creates inventory depletion and downstream production bottlenecks. "
+                    "Mitigation includes dual-sourcing, dynamic lead-time buffers, and targeted vendor recovery plans."
+                ),
+            },
+            {
+                "topic": "lead_time_anomalies",
+                "title": "Lead-Time Anomaly Detection Framework",
+                "content": (
+                    "Lead-time anomalies represent sudden statistically significant deviations in supplier fulfillment duration "
+                    "relative to historical baselines. Calculated using recent 90-day moving averages compared to historical averages, "
+                    "evaluated via percentage change and z-scores. A surge in lead time signals underlying manufacturing or logistical friction. "
+                    "Mitigation requires safety-stock adjustments and proactive supplier dispatch tracking."
+                ),
+            },
+            {
+                "topic": "disruption_risk",
+                "title": "Supplier Disruption Impact Framework",
+                "content": (
+                    "Disruption impact analysis traces supplier failure modes through dependent products, demand velocity, "
+                    "current inventory reserves, and stockout probabilities. When a high-disruption supplier feeds critical SKUs with low "
+                    "days-of-cover, stockout probability escalates rapidly. Mitigation involves strategic buffering and pre-qualifying backup suppliers."
+                ),
+            },
+            {
+                "topic": "inventory_stockout_risk",
+                "title": "Inventory Availability and Stockout Risk Framework",
+                "content": (
+                    "Inventory risk measures the likelihood that product stock is exhausted before replenish orders arrive. "
+                    "Key metrics include stockout rate, days of inventory cover, and demand pressure. Days of cover under 7 days "
+                    "is considered critical exposure. Mitigation includes expedited replenishment orders and dynamic reorder threshold adjustments."
+                ),
+            },
+            {
+                "topic": "route_logistics_risk",
+                "title": "Transportation and Route Risk Framework",
+                "content": (
+                    "Logistics route risk evaluates delay exposure and transit volatility across shipping corridors and 3PL partners. "
+                    "High delay rates and route disruptions jeopardize scheduled replenishment. Mitigation involves carrier re-allocation "
+                    "and contingency transit scheduling."
+                ),
+            },
+        ]
+
+        documents: list[KnowledgeDocument] = []
+        for r in risk_definitions:
+            documents.append(KnowledgeDocument(
+                doc_id=f"risk:{r['topic']}",
+                doc_type="risk",
+                entity_id=r["topic"],
+                title=r["title"],
+                content=r["content"],
+                metadata={
+                    "document_type": "risk",
+                    "topic": r["topic"],
+                    "risk_level": "GENERAL",
+                    "source": "risk_intelligence",
+                },
+            ))
 
         return documents

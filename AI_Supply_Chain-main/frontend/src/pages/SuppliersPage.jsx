@@ -84,13 +84,14 @@ function SuppliersPage({ auth }) {
       {error && <ErrorMessage title="Suppliers error" message={error} onRetry={loadSuppliers} />}
 
       {successMsg && (
-        <div className="system-card" style={{ marginBottom: "16px", borderColor: "rgba(34, 197, 94, 0.4)", background: "rgba(34, 197, 94, 0.08)" }}>
-          <strong style={{ color: "#22c55e" }}>{successMsg}</strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{successMsg}</strong>
         </div>
       )}
 
       {isAdmin && (
-        <section className="investigation-card" style={{ marginBottom: "20px" }}>
+        <section className="investigation-card" style={{ marginBottom: "24px" }}>
           <div className="section-header">
             <div>
               <span className="section-eyebrow">MANAGE</span>
@@ -98,17 +99,148 @@ function SuppliersPage({ auth }) {
             </div>
           </div>
 
-          <form onSubmit={handleCreate} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
-            <input className="search-input" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} placeholder="Supplier ID" required />
-            <input className="search-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" required />
-            <input className="search-input" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="Region" required />
-            <input className="search-input" value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} placeholder="Tier" required />
-            <select className="search-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="INACTIVE">INACTIVE</option>
-            </select>
-            <button type="submit" className="primary-button">Create Supplier</button>
-          </form>
+<form onSubmit={handleCreate} className="form-grid">
+
+  {/* SUPPLIER ID */}
+  <div className="form-field">
+    <label htmlFor="supplier_id">
+      Supplier ID
+    </label>
+
+    <input
+      id="supplier_id"
+      className="search-input"
+      type="text"
+      name="supplier_id"
+      value={form.supplier_id}
+      onChange={(e) =>
+        setForm({
+          ...form,
+          supplier_id: e.target.value,
+        })
+      }
+      placeholder="Enter supplier ID"
+      required
+    />
+  </div>
+
+
+  {/* NAME */}
+  <div className="form-field">
+    <label htmlFor="supplier_name">
+      Name
+    </label>
+
+    <input
+      id="supplier_name"
+      className="search-input"
+      type="text"
+      name="name"
+      value={form.name}
+      onChange={(e) =>
+        setForm({
+          ...form,
+          name: e.target.value,
+        })
+      }
+      placeholder="Enter supplier name"
+      required
+    />
+  </div>
+
+
+  {/* REGION */}
+  <div className="form-field">
+    <label htmlFor="supplier_region">
+      Region
+    </label>
+
+    <input
+      id="supplier_region"
+      className="search-input"
+      type="text"
+      name="region"
+      value={form.region}
+      onChange={(e) =>
+        setForm({
+          ...form,
+          region: e.target.value,
+        })
+      }
+      placeholder="Enter region"
+      required
+    />
+  </div>
+
+
+  {/* TIER */}
+  <div className="form-field">
+    <label htmlFor="supplier_tier">
+      Tier
+    </label>
+
+    <input
+      id="supplier_tier"
+      className="search-input"
+      type="text"
+      name="tier"
+      value={form.tier}
+      onChange={(e) =>
+        setForm({
+          ...form,
+          tier: e.target.value,
+        })
+      }
+      placeholder="Enter supplier tier"
+      required
+    />
+  </div>
+
+
+  {/* STATUS */}
+  <div className="form-field">
+    <label htmlFor="supplier_status">
+      Status
+    </label>
+
+    <select
+      id="supplier_status"
+      className="search-input"
+      name="status"
+      value={form.status}
+      onChange={(e) =>
+        setForm({
+          ...form,
+          status: e.target.value,
+        })
+      }
+    >
+      <option value="ACTIVE">ACTIVE</option>
+      <option value="INACTIVE">INACTIVE</option>
+    </select>
+  </div>
+
+
+  {/* CREATE BUTTON */}
+  <div className="form-field form-action">
+    <label className="form-label-placeholder">
+      &nbsp;
+    </label>
+
+    <button
+      type="submit"
+      className="primary-button"
+      style={{
+        width: "100%",
+        height: "42px",
+      }}
+    >
+      Create Supplier
+    </button>
+  </div>
+
+</form>
+
         </section>
       )}
 

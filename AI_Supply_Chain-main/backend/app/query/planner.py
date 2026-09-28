@@ -341,6 +341,114 @@ class SemanticQueryPlanner:
             )
 
         # -----------------------------------------------------
+        # Supplier delivery risk
+        # -----------------------------------------------------
+
+        if intent == "supplier_delivery_risk":
+            return QueryPlan(
+                domain="supplier",
+                operation="rank",
+                metric="late_rate",
+                direction="descending",
+                entity="supplier",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Product disruption impact
+        # -----------------------------------------------------
+
+        if intent == "product_disruption_impact" or metric == "supplier_disruption_impact":
+            return QueryPlan(
+                domain="product",
+                operation="rank",
+                metric="supplier_disruption_impact",
+                direction="descending",
+                entity="product",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Lead time anomaly
+        # -----------------------------------------------------
+
+        if intent == "lead_time_anomaly" or metric == "lead_time_anomaly":
+            return QueryPlan(
+                domain="supplier",
+                operation="detect_anomaly",
+                metric="lead_time_anomaly",
+                direction="descending",
+                entity="supplier",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Supplier investigation
+        # -----------------------------------------------------
+
+        if intent == "supplier_investigation":
+            return QueryPlan(
+                domain="supplier",
+                operation="investigate",
+                metric="late_rate",
+                direction="descending",
+                entity="supplier",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Major risks
+        # -----------------------------------------------------
+
+        if intent == "major_risks" or metric == "major_risks":
+            return QueryPlan(
+                domain="dashboard",
+                operation="explain",
+                metric="major_risks",
+                direction="none",
+                entity="supply_chain",
+                entity_id=None,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Supplier delay affect inventory
+        # -----------------------------------------------------
+
+        if intent == "supplier_inventory_impact":
+            return QueryPlan(
+                domain="product",
+                operation="impact_analysis",
+                metric="supplier_disruption_impact",
+                direction="descending",
+                entity="product",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
         # Delivery risk
         # -----------------------------------------------------
 
@@ -768,6 +876,8 @@ class SemanticQueryPlanner:
             entity_id = str(
                 entity_id
             ).strip().upper()
+        elif plan.entity_id:
+            entity_id = str(plan.entity_id).strip().upper()
 
         if relationship is not None:
             relationship = str(

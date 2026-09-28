@@ -430,7 +430,7 @@ function Forecast() {
                 >
 
                   <CartesianGrid
-                    stroke="#e2e8f0"
+                    stroke="#242424"
                     strokeDasharray="3 3"
                     vertical={false}
                   />
@@ -439,10 +439,10 @@ function Forecast() {
                     dataKey="date"
                     tickLine={false}
                     axisLine={{
-                      stroke: "#cbd5e1",
+                      stroke: "#292929",
                     }}
                     tick={{
-                      fill: "#64748b",
+                      fill: "#888888",
                       fontSize: 11,
                     }}
                     tickMargin={12}
@@ -453,7 +453,7 @@ function Forecast() {
                     axisLine={false}
                     width={45}
                     tick={{
-                      fill: "#64748b",
+                      fill: "#888888",
                       fontSize: 11,
                     }}
                     tickMargin={8}
@@ -462,23 +462,23 @@ function Forecast() {
 
                   <Tooltip
                     cursor={{
-                      stroke: "#94a3b8",
+                      stroke: "rgba(212, 175, 55, 0.4)",
                       strokeDasharray: "4 4",
                     }}
                     contentStyle={{
-                      border: "1px solid #dbe4ef",
+                      border: "1px solid #292929",
                       borderRadius: "10px",
-                      background: "#ffffff",
+                      background: "#151515",
                       boxShadow:
-                        "0 8px 24px rgba(15, 23, 42, 0.10)",
+                        "0 8px 24px rgba(0, 0, 0, 0.45)",
                     }}
                     labelStyle={{
-                      color: "#475569",
+                      color: "#F5F5F5",
                       fontWeight: 700,
                       marginBottom: "4px",
                     }}
                     itemStyle={{
-                      color: "#2563eb",
+                      color: "#D4AF37",
                       fontWeight: 700,
                     }}
                     formatter={(value) => [
@@ -490,12 +490,12 @@ function Forecast() {
                   <Line
                     type="monotone"
                     dataKey="forecast"
-                    stroke="#2563eb"
+                    stroke="#D4AF37"
                     strokeWidth={3}
                     dot={{
                       r: 4,
                       strokeWidth: 2,
-                      fill: "#ffffff",
+                      fill: "#080808",
                     }}
                     activeDot={{
                       r: 7,

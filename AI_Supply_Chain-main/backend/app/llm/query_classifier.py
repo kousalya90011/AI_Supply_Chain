@@ -97,6 +97,12 @@ class QueryClassifier:
         "product_cost_ranking",
         "order_analysis",
         "multi_requirement",
+        "product_disruption_impact",
+        "lead_time_anomaly",
+        "supplier_investigation",
+        "major_risks",
+        "supplier_delivery_risk",
+        "supplier_inventory_impact",
         "unknown",
     }
 
@@ -126,6 +132,13 @@ class QueryClassifier:
         "product_demand",
         "product_inventory",
         "product_delivery",
+        "supplier_offers",
+        "lead_time_anomaly",
+        "supplier_disruption_impact",
+        "major_risks",
+        "supplier_investigation",
+        "supplier_inventory_impact",
+        "late_rate",
         None,
     }
 
@@ -145,6 +158,7 @@ class QueryClassifier:
         "supply_chain",
         "dashboard",
         "3pl",
+        "offers",
         None,
     }
 
@@ -1863,6 +1877,188 @@ Return only JSON.
             }
 
         # -----------------------------------------------------
+        # Unsupported / Out-of-domain queries
+        # -----------------------------------------------------
+        if self._contains_any(
+            query,
+            {"weather", "tokyo", "guitar", "strings in", "capital of", "president", "football", "cricket"}
+        ):
+            return {
+                "intent": "unknown",
+                "metric": None,
+                "scope": None,
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.0,
+                "requirements": [],
+                "method": "unsupported_domain",
+            }
+
+        # -----------------------------------------------------
+        # Product impact from supplier disruptions
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"disruption", "disruptions", "disrupted"})
+            and self._contains_any(query, {"product", "products", "affected", "impact", "most affected", "vulnerable"})
+        ):
+            return {
+                "intent": "product_disruption_impact",
+                "metric": "supplier_disruption_impact",
+                "scope": "product",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "product",
+                        "operation": "rank",
+                        "metric": "supplier_disruption_impact",
+                        "direction": "descending",
+                        "entity": "product",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Lead time anomaly / unusual lead time changes
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"lead time", "lead times", "lead-time", "leadtime"})
+            and self._contains_any(query, {"unusual", "change", "changes", "anomaly", "anomalies", "abnormal", "spike", "spikes", "identify"})
+        ) or (
+            self._contains_any(query, {"unusual changes", "lead time changes", "unusual lead times"})
+        ):
+            return {
+                "intent": "lead_time_anomaly",
+                "metric": "lead_time_anomaly",
+                "scope": "supplier",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "supplier",
+                        "operation": "detect_anomaly",
+                        "metric": "lead_time_anomaly",
+                        "direction": "descending",
+                        "entity": "supplier",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Supplier investigation query
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"investigate", "investigated", "investigation", "audit", "scrutiny", "look into"})
+            and self._contains_any(query, {"supplier", "suppliers", "vendor", "vendors", "performance"})
+        ):
+            return {
+                "intent": "supplier_investigation",
+                "metric": "late_rate",
+                "scope": "supplier",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "supplier",
+                        "operation": "investigate",
+                        "metric": "late_rate",
+                        "direction": "descending",
+                        "entity": "supplier",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Major supply chain risks
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"major risk", "major risks", "major supply chain risks", "key risks", "top risks", "critical risks"})
+            or (self._contains_any(query, {"risks"}) and self._contains_any(query, {"major", "biggest", "evidence supports", "supply chain risks"}))
+        ):
+            return {
+                "intent": "major_risks",
+                "metric": "major_risks",
+                "scope": "dashboard",
+                "complexity": "complex",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "dashboard",
+                        "operation": "explain",
+                        "metric": "major_risks",
+                        "direction": "none",
+                        "entity": "supply_chain",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Supplier delivery delays / late risk
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"supplier", "suppliers"})
+            and self._contains_any(query, {"delivery delays", "delivery delay", "late delivery", "late deliveries", "delay risk", "delay risks", "high risk of delivery"})
+        ):
+            return {
+                "intent": "supplier_delivery_risk",
+                "metric": "late_rate",
+                "scope": "supplier",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "supplier",
+                        "operation": "rank",
+                        "metric": "late_rate",
+                        "direction": "descending",
+                        "entity": "supplier",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Supplier delay affecting inventory
+        # -----------------------------------------------------
+        if (
+            self._contains_any(query, {"supplier delay", "supplier delays", "delays from supplier"})
+            and self._contains_any(query, {"inventory", "stockout", "availability", "stock"})
+        ):
+            return {
+                "intent": "supplier_inventory_impact",
+                "metric": "supplier_disruption_impact",
+                "scope": "supply_chain",
+                "complexity": "complex",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "product",
+                        "operation": "impact_analysis",
+                        "metric": "supplier_disruption_impact",
+                        "direction": "descending",
+                        "entity": "supply_chain",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
         # Semantic summary / overview / explain
         # -----------------------------------------------------
 
@@ -2285,7 +2481,6 @@ Return only JSON.
                     "supplier of",
                     "supplied",
                     "supplies",
-                    "supply",
                     "provides product",
                     "provide product",
                     "provided product",
@@ -2306,8 +2501,8 @@ Return only JSON.
                 )
                 or bool(re.search(r"\bP\d+\b", query.upper()))
                 or bool(re.search(r"\bS\d+\b", query.upper()))
-                or "supply" in query.lower()
             )
+            and not self._contains_any(query, {"risk", "delay", "late", "anomaly", "disruption", "anomalies", "impact"})
         ):
             is_supplier_target = bool(re.search(r"\bS\d+\b", query.upper())) or "supplier" in query.lower()
             metric_name = "supplier_product" if is_supplier_target else "product_supplier"
@@ -2444,6 +2639,8 @@ Return only JSON.
                 "late delivery",
                 "late deliveries",
                 "delivery performance",
+                "delivery risk",
+                "delivery risks",
             },
         ):
 
@@ -2770,6 +2967,28 @@ Return only JSON.
                 "operation": "rank",
                 "metric": "late_rate",
                 "direction": "descending",
+                "entity": "supplier",
+                "entity_id": None,
+                "depends_on": None,
+            }
+
+        elif self._contains_any(query, {"who supplied", "who supplies", "what supplier supplied", "which supplier supplied", "which supplier supplies", "supplied by"}) and self._contains_any(query, {"orders", "order count", "total orders"}):
+            primary = {
+                "domain": "supplier",
+                "operation": "lookup",
+                "metric": "product_supplier",
+                "direction": "none",
+                "entity": "product",
+                "entity_id": None,
+                "depends_on": None,
+            }
+
+        elif self._contains_any(query, {"products are supplied", "products supplied", "what products", "which products"}) and self._contains_any(query, {"inventory", "stock", "stockout", "status"}):
+            primary = {
+                "domain": "supplier",
+                "operation": "lookup",
+                "metric": "supplier_product",
+                "direction": "none",
                 "entity": "supplier",
                 "entity_id": None,
                 "depends_on": None,

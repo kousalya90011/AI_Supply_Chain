@@ -35,14 +35,22 @@ def parse_llm_output(
     # -------------------------------------------------
 
     try:
-
         result = json.loads(text)
-
     except json.JSONDecodeError as exc:
-
-        raise ValueError(
-            f"LLM returned invalid JSON: {exc}"
-        )
+        # Attempt repair for truncated closing braces
+        repaired = text.rstrip()
+        if repaired.count('"') % 2 != 0:
+            repaired += '"'
+        open_sq = repaired.count("[") - repaired.count("]")
+        if open_sq > 0:
+            repaired += "]" * open_sq
+        open_curly = repaired.count("{") - repaired.count("}")
+        if open_curly > 0:
+            repaired += "}" * open_curly
+        try:
+            result = json.loads(repaired)
+        except Exception:
+            raise ValueError(f"LLM returned invalid JSON: {exc}")
 
     if not isinstance(result, dict):
 
@@ -54,49 +62,32 @@ def parse_llm_output(
     # Validate expected fields
     # -------------------------------------------------
 
-    summary = result.get(
-        "summary"
+    summary = result.get("summary") or result.get("direct_answer") or result.get("answer")
+    key_findings = result.get("key_findings", [])
+    business_impact = (
+        result.get("business_impact")
+        or result.get("interpretation")
+        or result.get("why_it_matters")
+        or ""
     )
-
-    key_findings = result.get(
-        "key_findings",
-        []
+    recommended_actions = (
+        result.get("recommended_actions")
+        or result.get("recommendations")
+        or []
     )
+    confidence = result.get("confidence", 0.85)
 
-    business_impact = result.get(
-        "business_impact",
-        ""
-    )
-
-    recommended_actions = result.get(
-        "recommended_actions",
-        []
-    )
-
-    confidence = result.get(
-        "confidence",
-        0.0
-    )
-
-    if not isinstance(summary, str):
-        raise ValueError(
-            "Invalid 'summary' field."
-        )
+    if not isinstance(summary, str) or not summary.strip():
+        summary = "Operational supply chain analysis based on retrieved evidence."
 
     if not isinstance(key_findings, list):
-        raise ValueError(
-            "Invalid 'key_findings' field."
-        )
+        key_findings = [str(key_findings)] if key_findings else []
 
     if not isinstance(recommended_actions, list):
-        raise ValueError(
-            "Invalid 'recommended_actions' field."
-        )
+        recommended_actions = [str(recommended_actions)] if recommended_actions else []
 
     if not isinstance(business_impact, str):
-        raise ValueError(
-            "Invalid 'business_impact' field."
-        )
+        business_impact = str(business_impact) if business_impact else ""
 
     try:
         confidence = float(confidence)

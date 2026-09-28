@@ -39,15 +39,31 @@ class LLMClient:
         self,
         client: OpenAI,
         model: str,
-        messages: list[dict[str, str]]
+        messages: list[dict[str, str]],
+        max_tokens: int = 340,
     ) -> dict[str, Any]:
+        import re
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1024
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=max_tokens,
+            )
+        except Exception as exc:
+            err_str = str(exc)
+            match = re.search(r"can only afford (\d+)", err_str)
+            if match and int(match.group(1)) > 60:
+                affordable = max(50, int(match.group(1)) - 10)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=affordable,
+                )
+            else:
+                raise exc
 
         content = response.choices[0].message.content
 

@@ -30,17 +30,21 @@ class SemanticRetriever:
         user_scope: QueryScope | None = None,
         doc_type: str | None = None,
         target_entity_id: str | None = None,
+        topic: str | None = None,
+        risk_level: str | None = None,
     ) -> RetrievalResult:
         """
         Retrieves matching knowledge documents and converts them to standard EvidenceItems.
         """
-        # Search the vector store with RBAC pre-filtering
+        # Search the vector store with RBAC and metadata pre-filtering
         matches = self.vector_store.search(
             query=query,
             top_k=top_k,
             user_scope=user_scope,
             doc_type=doc_type,
             target_entity_id=target_entity_id,
+            topic=topic,
+            risk_level=risk_level,
         )
 
         evidence_items: list[dict[str, Any]] = []
@@ -51,18 +55,22 @@ class SemanticRetriever:
             documents.append(doc)
             sources.add(f"Knowledge Base ({doc.doc_type.capitalize()}: {doc.entity_id})")
 
+            topic_label = str(doc.metadata.get("topic", "operational_profile")).replace("_", " ").title()
             ev = EvidenceItem(
                 source_type="knowledge_base",
                 source_id=doc.doc_id,
                 entity_type=doc.doc_type,
                 entity_id=doc.entity_id,
-                metric="knowledge_summary",
+                metric=doc.metadata.get("topic", "knowledge_summary"),
                 value=doc.content,
-                explanation=f"Semantic knowledge summary for {doc.title}",
+                explanation=f"{doc.title}: {doc.content}",
                 retrieval_method="semantic",
                 confidence=round(score, 4),
             )
-            evidence_items.append(ev.to_dict())
+            item_dict = ev.to_dict()
+            item_dict["topic"] = doc.metadata.get("topic")
+            item_dict["metadata"] = doc.metadata
+            evidence_items.append(item_dict)
 
         return RetrievalResult(
             retrieval_mode="semantic",

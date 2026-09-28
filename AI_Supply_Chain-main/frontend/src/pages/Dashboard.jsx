@@ -463,7 +463,7 @@ function Dashboard() {
                   <Bar
                     dataKey="lateRate"
                     radius={[5, 5, 0, 0]}
-                    fill="#2563eb"
+                    fill="#D4AF37"
                   />
                 </BarChart>
               </ResponsiveContainer>
@@ -499,10 +499,10 @@ function Dashboard() {
                       {inventoryRiskDistribution.map(
                         (entry) => {
                           const colors = {
-                            CRITICAL: "#dc2626",
-                            HIGH: "#f59e0b",
-                            MEDIUM: "#f97316",
-                            LOW: "#22c55e",
+                            CRITICAL: "#B85C5C",
+                            HIGH: "#D4AF37",
+                            MEDIUM: "#C8B98A",
+                            LOW: "#666666",
                           };
 
                           return (
@@ -603,7 +603,7 @@ function Dashboard() {
 
                 <Bar
                   dataKey="value"
-                  fill="#1d4ed8"
+                  fill="#E5C45A"
                   radius={[0, 5, 5, 0]}
                   barSize={24}
                 />

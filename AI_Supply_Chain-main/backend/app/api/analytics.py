@@ -33,11 +33,16 @@ def dashboard():
 
 
 @router.get("/supplier-risk")
-def supplier_risk():
+def supplier_risk(limit: int | None = None):
 
     df = service.supplier_risk()
 
-    return df.head(20).to_dict(
+    if limit is not None and limit > 0:
+        return df.head(limit).to_dict(
+            orient="records"
+        )
+
+    return df.to_dict(
         orient="records"
     )
 

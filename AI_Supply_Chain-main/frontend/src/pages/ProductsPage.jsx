@@ -84,13 +84,14 @@ function ProductsPage({ auth, mode }) {
       {error && <ErrorMessage title="Products error" message={error} onRetry={loadProducts} />}
 
       {successMsg && (
-        <div className="system-card" style={{ marginBottom: "16px", borderColor: "rgba(34, 197, 94, 0.4)", background: "rgba(34, 197, 94, 0.08)" }}>
-          <strong style={{ color: "#22c55e" }}>{successMsg}</strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{successMsg}</strong>
         </div>
       )}
 
       {isAdmin && (
-        <section className="investigation-card" style={{ marginBottom: "20px" }}>
+        <section className="investigation-card" style={{ marginBottom: "24px" }}>
           <div className="section-header">
             <div>
               <span className="section-eyebrow">MANAGE</span>
@@ -98,7 +99,7 @@ function ProductsPage({ auth, mode }) {
             </div>
           </div>
 
-          <form onSubmit={handleCreate} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+          <form onSubmit={handleCreate} className="form-grid">
             <input className="search-input" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} placeholder="Product ID" required />
             <input className="search-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" required />
             <input className="search-input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category" required />
@@ -107,7 +108,7 @@ function ProductsPage({ auth, mode }) {
               <option value="ACTIVE">ACTIVE</option>
               <option value="INACTIVE">INACTIVE</option>
             </select>
-            <button type="submit" className="primary-button">Create Product</button>
+            <button type="submit" className="primary-button" style={{ height: "42px" }}>Create Product</button>
           </form>
         </section>
       )}

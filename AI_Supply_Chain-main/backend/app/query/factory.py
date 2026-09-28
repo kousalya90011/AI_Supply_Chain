@@ -13,6 +13,9 @@ from app.analytics.delivery_risk import DeliveryRiskAnalyzer
 from app.analytics.product_cost import ProductCostAnalyzer
 from app.analytics.product_supplier import ProductSupplierAnalyzer
 from app.analytics.offers_analyzer import OffersAnalyzer
+from app.analytics.lead_time_anomaly import LeadTimeAnomalyAnalyzer
+from app.analytics.supplier_disruption_impact import SupplierDisruptionImpactAnalyzer
+from app.analytics.major_risks import MajorRisksAnalyzer
 
 from app.query.registry import AnalyticsRegistry
 from app.query.schema import QueryPlan
@@ -121,7 +124,11 @@ class AnalyticsAdapter:
         # LIMIT RESULTS
         # =====================================================
 
-        if plan.operation == "rank":
+        if plan.metric in {"major_risks", "summary", "risk_profile"}:
+
+            pass
+
+        elif plan.operation == "rank":
 
             dataframe = dataframe.head(5)
 
@@ -506,6 +513,50 @@ class AnalyticsAdapter:
                 top_n=None,
             )
 
+        # =====================================================
+        # LEAD TIME ANOMALY
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            LeadTimeAnomalyAnalyzer,
+        ):
+            datasets = self._datasets()
+            orders = datasets.get("orders_extended")
+            sid = str(plan.entity_id) if plan.entity == "supplier" and plan.entity_id else None
+            res = self.analyzer.analyze(orders=orders, supplier_id=sid)
+            return pd.DataFrame(res.get("findings", []))
+
+        # =====================================================
+        # SUPPLIER DISRUPTION IMPACT
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            SupplierDisruptionImpactAnalyzer,
+        ):
+            datasets = self._datasets()
+            sid = str(plan.entity_id) if plan.entity == "supplier" and plan.entity_id else None
+            pid = str(plan.entity_id) if plan.entity == "product" and plan.entity_id else None
+            res = self.analyzer.analyze(datasets=datasets, supplier_id=sid, product_id=pid)
+            return pd.DataFrame(res.get("findings", []))
+
+        # =====================================================
+        # MAJOR RISKS
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            MajorRisksAnalyzer,
+        ):
+            datasets = self._datasets()
+            res = self.analyzer.analyze(datasets=datasets)
+            findings = []
+            for domain, data in res.get("findings", {}).items():
+                if isinstance(data, dict):
+                    findings.append({"risk_domain": domain, **data})
+            return pd.DataFrame(findings)
+
         raise TypeError(
             "Unsupported analytics analyzer: "
             f"{type(self.analyzer).__name__}"
@@ -575,6 +626,9 @@ class AnalyticsAdapter:
 
             # Forecast / anomaly if later registered
             "lead_time_days": "lead_time_days",
+            "lead_time_anomaly": "absolute_change_days",
+            "supplier_disruption_impact": "exposure_score",
+            "major_risks": "risk_score",
         }
 
         column = column_map.get(
@@ -639,7 +693,11 @@ class AnalyticsAdapter:
 
         for key, value in record.items():
 
-            if pd.isna(value):
+            if isinstance(value, (list, dict, tuple, set)):
+
+                cleaned[key] = value
+
+            elif pd.isna(value):
 
                 cleaned[key] = None
 
@@ -669,17 +727,117 @@ class AnalyticsAdapter:
         evidence: list[dict[str, Any]] = []
 
         for record in records[:5]:
+            metric = plan.metric or "supply_chain_analytics"
+            val: Any = None
+            explanation = ""
+
+            if metric == "total_demand":
+                pid = record.get("product_id") or plan.entity_id
+                dem = record.get("total_demand", 0.0)
+                val = round(float(dem), 1) if isinstance(dem, (int, float)) else dem
+                explanation = f"Product {pid}: total demand of {val:,.1f} units over analyzed period."
+            elif metric == "total_sales":
+                pid = record.get("product_id") or plan.entity_id
+                sales = record.get("total_sales", 0.0)
+                val = round(float(sales), 2) if isinstance(sales, (int, float)) else sales
+                explanation = f"Product {pid}: total sales volume of ${val:,.2f}."
+            elif metric == "unit_cost":
+                pid = record.get("product_id") or plan.entity_id
+                cost = record.get("unit_cost", 0.0)
+                val = round(float(cost), 2) if isinstance(cost, (int, float)) else cost
+                explanation = f"Product {pid}: standard unit cost of ${val:,.2f}."
+            elif metric == "product_supplier":
+                pid = record.get("product_id") or plan.entity_id
+                sid = record.get("supplier_id")
+                sname = record.get("supplier_name", sid)
+                val = f"{sid} ({sname})"
+                explanation = f"Product {pid} is supplied by {sid} ({sname})."
+            elif metric == "supplier_product":
+                sid = record.get("supplier_id") or plan.entity_id
+                pid = record.get("product_id")
+                val = pid
+                explanation = f"Supplier {sid} supplies product {pid}."
+            elif metric == "supplier_offers":
+                sid = record.get("supplier_id")
+                pid = record.get("product_id")
+                price = record.get("unit_price", 0.0)
+                lead = record.get("lead_time_days", 0)
+                val = round(float(price), 2)
+                explanation = f"Supplier {sid} offers {pid} at ${price:.2f} with {lead}d lead time."
+            elif metric in {"late_rate", "supplier_delivery_risk"}:
+                sid = record.get("supplier_id") or plan.entity_id
+                lr = record.get("late_rate", 0.0)
+                delay = record.get("avg_delay") or record.get("avg_delay_days", 0.0)
+                orders = record.get("total_orders", 0)
+                lvl = record.get("risk_level", "EVALUATED")
+                val = round(float(lr) * 100, 1) if isinstance(lr, (int, float)) else lr
+                explanation = f"Supplier {sid}: {val:.1f}% late rate, average delay {delay:.1f}d across {orders:,} orders ({lvl} risk)."
+            elif metric in {"risk_score", "inventory_risk"}:
+                pid = record.get("product_id") or plan.entity_id
+                score = record.get("risk_score", 0.0)
+                stockout = record.get("stockout_rate", 0.0)
+                doc = record.get("days_of_cover", 0.0)
+                lvl = record.get("risk_level", "EVALUATED")
+                val = round(float(score), 1) if isinstance(score, (int, float)) else score
+                explanation = f"Product {pid}: risk score {val}, stockout rate {stockout*100:.1f}%, days of cover {doc:.1f}d ({lvl} risk)."
+            elif metric in {"inventory_units", "product_inventory"}:
+                pid = record.get("product_id") or plan.entity_id
+                inv = record.get("inventory_units") or record.get("avg_inventory") or record.get("min_inventory", 0.0)
+                doc = record.get("days_of_cover", 0.0)
+                val = round(float(inv), 1) if isinstance(inv, (int, float)) else inv
+                explanation = f"Product {pid}: recorded inventory {val} units, days of cover {doc:.1f}d."
+            elif metric == "lead_time_anomaly":
+                sid = record.get("supplier_id") or plan.entity_id
+                diff = record.get("absolute_change_days", 0.0)
+                pct = record.get("percentage_change", 0.0)
+                status = record.get("status", "Anomalous")
+                val = round(float(diff), 1) if isinstance(diff, (int, float)) else diff
+                explanation = f"Supplier {sid}: lead time change {diff:+.1f}d ({pct:+.1f}%), status: {status}."
+            elif metric == "supplier_disruption_impact":
+                pid = record.get("product_id") or plan.entity_id
+                sid = record.get("supplier_id")
+                score = record.get("exposure_score") if record.get("exposure_score") is not None else record.get("disruption_exposure_score", 0.0)
+                val = round(float(score), 1) if isinstance(score, (int, float)) else score
+                explanation = f"Product {pid} (Supplier {sid}): disruption exposure score {val}/100."
+            elif metric == "major_risks":
+                domain = record.get("risk_domain", "risk_domain")
+                val = domain
+                if domain == "supplier_risk":
+                    crit = record.get("critical_count", 0)
+                    high = record.get("high_count", 0)
+                    explanation = f"Supplier delivery risk: {crit:.0f} Critical and {high:.0f} High risk suppliers identified."
+                elif domain == "inventory_risk":
+                    stockouts = record.get("products_with_stockouts", 0)
+                    explanation = f"Inventory vulnerability: {stockouts:.0f} products face historical stockout exposure."
+                elif domain == "delivery_risk":
+                    late = record.get("system_late_rate", 0.0)
+                    delay = record.get("system_avg_delay", 0.0)
+                    explanation = f"Logistics carrier friction: system late rate {late:.1f}%, average delay {delay:.1f}d."
+                elif domain == "route_risk":
+                    rt_cnt = record.get("routes_evaluated", 0)
+                    explanation = f"Transportation routes: {rt_cnt:.0f} active shipping routes evaluated."
+                elif domain == "lead_time_anomalies":
+                    anom = record.get("anomalies_detected", 0)
+                    explanation = f"Lead time inflation: {anom:.0f} suppliers detected with significant lead-time surges."
+                else:
+                    explanation = f"Major risk domain: {domain}."
+            else:
+                val = record.get(metric) or record.get("value")
+                summary_parts = [f"{k}: {v}" for k, v in record.items() if not isinstance(v, (dict, list)) and v is not None][:3]
+                ent = plan.entity_id or record.get("product_id") or record.get("supplier_id") or ""
+                explanation = f"{metric.replace('_', ' ').title()}{(' for ' + str(ent)) if ent else ''}: {', '.join(summary_parts)}." if summary_parts else f"Structured finding for {metric}."
 
             evidence.append(
                 {
-                    "source": (
-                        plan.metric
-                        or "supply_chain_analytics"
-                    ),
-                    "metric": plan.metric,
+                    "source": metric,
+                    "metric": metric,
                     "entity": plan.entity,
                     "entity_id": plan.entity_id,
+                    "value": val,
+                    "explanation": explanation,
                     "data": record,
+                    "retrieval_method": "structured",
+                    "confidence": 1.0,
                 }
             )
 
@@ -958,6 +1116,50 @@ def create_analytics_registry(
             analyzer=OffersAnalyzer(),
             data_service=data_service,
             dataset_name="supplier_offers",
+            entity_column="supplier_id",
+        ),
+    )
+
+    # =========================================================
+    # DOMAIN SPECIFIC ANALYTICS
+    # =========================================================
+
+    registry.register(
+        "lead_time_anomaly",
+        AnalyticsAdapter(
+            analyzer=LeadTimeAnomalyAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column="supplier_id",
+        ),
+    )
+
+    registry.register(
+        "supplier_disruption_impact",
+        AnalyticsAdapter(
+            analyzer=SupplierDisruptionImpactAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column="product_id",
+        ),
+    )
+
+    registry.register(
+        "major_risks",
+        AnalyticsAdapter(
+            analyzer=MajorRisksAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column=None,
+        ),
+    )
+
+    registry.register(
+        "supplier_investigation",
+        AnalyticsAdapter(
+            analyzer=SupplierRiskAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
             entity_column="supplier_id",
         ),
     )

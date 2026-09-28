@@ -29,6 +29,11 @@ ALLOWED_METRICS = {
     "product_delivery",
     "supplier_offers",
     "summary",
+    "lead_time_anomaly",
+    "supplier_disruption_impact",
+    "major_risks",
+    "supplier_investigation",
+    "supplier_inventory_impact",
 }
 
 

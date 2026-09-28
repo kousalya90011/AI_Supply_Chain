@@ -89,13 +89,14 @@ function OrdersPage({ auth, mode }) {
       {error && <ErrorMessage title="Orders error" message={error} onRetry={loadOrders} />}
 
       {successMsg && (
-        <div className="system-card" style={{ marginBottom: "16px", borderColor: "rgba(34, 197, 94, 0.4)", background: "rgba(34, 197, 94, 0.08)" }}>
-          <strong style={{ color: "#22c55e" }}>{successMsg}</strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{successMsg}</strong>
         </div>
       )}
 
       {isAdminOrManager && (
-        <section className="investigation-card" style={{ marginBottom: "20px" }}>
+        <section className="investigation-card" style={{ marginBottom: "24px" }}>
           <div className="section-header">
             <div>
               <span className="section-eyebrow">CREATE</span>
@@ -103,7 +104,7 @@ function OrdersPage({ auth, mode }) {
             </div>
           </div>
 
-          <form onSubmit={handleCreate} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+          <form onSubmit={handleCreate} className="form-grid">
             <input className="search-input" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} placeholder="Product ID" required />
             <input className="search-input" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} placeholder="Supplier ID" required />
             <input className="search-input" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="Quantity" required />
@@ -113,7 +114,7 @@ function OrdersPage({ auth, mode }) {
               <option value="IN_TRANSIT">IN_TRANSIT</option>
               <option value="DELIVERED">DELIVERED</option>
             </select>
-            <button type="submit" className="primary-button">Create Order</button>
+            <button type="submit" className="primary-button" style={{ height: "42px" }}>Create Order</button>
           </form>
         </section>
       )}
@@ -154,16 +155,16 @@ function OrdersPage({ auth, mode }) {
                         fontWeight: "600",
                         backgroundColor:
                           order.status === "DELIVERED"
-                            ? "rgba(34, 197, 94, 0.15)"
+                            ? "rgba(212, 175, 55, 0.12)"
                             : order.status === "IN_TRANSIT"
-                            ? "rgba(59, 130, 246, 0.15)"
-                            : "rgba(234, 179, 8, 0.15)",
+                            ? "rgba(212, 175, 55, 0.10)"
+                            : "#1C1C1C",
                         color:
                           order.status === "DELIVERED"
-                            ? "#22c55e"
+                            ? "#D4AF37"
                             : order.status === "IN_TRANSIT"
-                            ? "#3b82f6"
-                            : "#eab308",
+                            ? "#E5C45A"
+                            : "#B8B8B8",
                       }}
                     >
                       {order.status}

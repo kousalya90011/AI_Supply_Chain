@@ -574,6 +574,8 @@ class QueryExecutor:
                 requirement.domain,
             )
 
+            enriched_evidence.append(evidence_item)
+
         # -----------------------------------------------------
         # Scope filtering on requirement findings and evidence
         # -----------------------------------------------------

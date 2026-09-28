@@ -239,10 +239,10 @@ function RouteRisk() {
 
 
   const pieColors = [
-    "#dc2626",
-    "#ea580c",
-    "#d97706",
-    "#16a34a",
+    "#B85C5C",
+    "#D4AF37",
+    "#C8B98A",
+    "#666666",
   ];
 
 
@@ -1170,7 +1170,7 @@ function RouteRisk() {
 
                 <Bar
                   dataKey="lateRate"
-                  fill="#2563eb"
+                  fill="#D4AF37"
                   radius={[
                     0,
                     6,

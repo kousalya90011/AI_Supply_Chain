@@ -76,13 +76,14 @@ function InventoryPage({ auth }) {
       {error && <ErrorMessage title="Inventory error" message={error} onRetry={loadInventory} />}
 
       {successMsg && (
-        <div className="system-card" style={{ marginBottom: "16px", borderColor: "rgba(34, 197, 94, 0.4)", background: "rgba(34, 197, 94, 0.08)" }}>
-          <strong style={{ color: "#22c55e" }}>{successMsg}</strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{successMsg}</strong>
         </div>
       )}
 
       {isAdminOrManager && (
-        <section className="investigation-card" style={{ marginBottom: "20px" }}>
+        <section className="investigation-card" style={{ marginBottom: "24px" }}>
           <div className="section-header">
             <div>
               <span className="section-eyebrow">MANAGE</span>
@@ -90,16 +91,16 @@ function InventoryPage({ auth }) {
             </div>
           </div>
 
-          <form onSubmit={handleCreate} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+          <form onSubmit={handleCreate} className="form-grid">
             <input className="search-input" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} placeholder="Product ID" required />
             <input className="search-input" type="datetime-local" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
             <input className="search-input" type="number" value={form.inventory_level} onChange={(e) => setForm({ ...form, inventory_level: e.target.value })} placeholder="Inventory level" required />
             <input className="search-input" type="number" value={form.demand} onChange={(e) => setForm({ ...form, demand: e.target.value })} placeholder="Demand" required />
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "inherit" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "inherit", cursor: "pointer", height: "42px", margin: 0 }}>
               <input type="checkbox" checked={form.stockout} onChange={(e) => setForm({ ...form, stockout: e.target.checked })} />
               Stockout
             </label>
-            <button type="submit" className="primary-button">Create Inventory</button>
+            <button type="submit" className="primary-button" style={{ height: "42px" }}>Create Inventory</button>
           </form>
         </section>
       )}

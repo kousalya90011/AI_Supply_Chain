@@ -1092,14 +1092,14 @@ function InventoryRisk() {
                 <CartesianGrid
                   strokeDasharray="3 3"
                   horizontal={false}
-                  stroke="#eef2f7"
+                  stroke="#242424"
                 />
 
                 <XAxis
                   type="number"
                   domain={[0, 100]}
                   tick={{
-                    fill: "#94a3b8",
+                    fill: "#888888",
                     fontSize: 9,
                   }}
                 />
@@ -1109,7 +1109,7 @@ function InventoryRisk() {
                   type="category"
                   width={65}
                   tick={{
-                    fill: "#64748b",
+                    fill: "#888888",
                     fontSize: 9,
                   }}
                 />
@@ -1123,7 +1123,7 @@ function InventoryRisk() {
 
                 <Bar
                   dataKey="score"
-                  fill="#2563eb"
+                  fill="#D4AF37"
                   radius={[
                     0,
                     4,

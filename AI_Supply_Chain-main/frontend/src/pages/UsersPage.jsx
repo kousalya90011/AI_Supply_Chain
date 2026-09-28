@@ -303,23 +303,9 @@ function UsersPage({ auth }) {
       ====================================================== */}
 
       {successMsg && (
-        <div
-          className="system-card"
-          style={{
-            marginBottom: "16px",
-            borderColor:
-              "rgba(34, 197, 94, 0.4)",
-            background:
-              "rgba(34, 197, 94, 0.08)",
-          }}
-        >
-          <strong
-            style={{
-              color: "#22c55e",
-            }}
-          >
-            {successMsg}
-          </strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{successMsg}</strong>
         </div>
       )}
 
@@ -328,55 +314,29 @@ function UsersPage({ auth }) {
           CREATE USER
       ====================================================== */}
 
-      <section
-        className="investigation-card"
-        style={{
-          marginBottom: "20px",
-        }}
-      >
+      <section className="investigation-card" style={{ marginBottom: "24px" }}>
 
         <div className="section-header">
           <div>
-
             <span className="section-eyebrow">
               CREATE USER
             </span>
-
             <h2>
               Add user
             </h2>
-
           </div>
         </div>
 
-
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: "12px",
-            alignItems: "end",
-          }}
-        >
+        <form onSubmit={handleSubmit} className="form-grid">
 
           {/* USERNAME */}
-
           <div>
-            <label
-              style={{
-                fontSize: "12px",
-                opacity: 0.8,
-                display: "block",
-                marginBottom: "4px",
-              }}
-            >
+            <label>
               Username
             </label>
-
             <input
               className="search-input"
+              type="text"
               name="username"
               value={form.username}
               onChange={handleChange}
@@ -386,21 +346,11 @@ function UsersPage({ auth }) {
             />
           </div>
 
-
           {/* EMAIL */}
-
           <div>
-            <label
-              style={{
-                fontSize: "12px",
-                opacity: 0.8,
-                display: "block",
-                marginBottom: "4px",
-              }}
-            >
+            <label>
               Email
             </label>
-
             <input
               className="search-input"
               type="email"
@@ -412,23 +362,14 @@ function UsersPage({ auth }) {
             />
           </div>
 
-
           {/* NAME */}
-
           <div>
-            <label
-              style={{
-                fontSize: "12px",
-                opacity: 0.8,
-                display: "block",
-                marginBottom: "4px",
-              }}
-            >
+            <label>
               Name
             </label>
-
             <input
               className="search-input"
+              type="text"
               name="name"
               value={form.name}
               onChange={handleChange}
@@ -437,21 +378,11 @@ function UsersPage({ auth }) {
             />
           </div>
 
-
           {/* PASSWORD */}
-
           <div>
-            <label
-              style={{
-                fontSize: "12px",
-                opacity: 0.8,
-                display: "block",
-                marginBottom: "4px",
-              }}
-            >
+            <label>
               Password
             </label>
-
             <input
               className="search-input"
               type="password"
@@ -464,82 +395,52 @@ function UsersPage({ auth }) {
             />
           </div>
 
-
           {/* ROLE */}
-
           <div>
-            <label
-              style={{
-                fontSize: "12px",
-                opacity: 0.8,
-                display: "block",
-                marginBottom: "4px",
-              }}
-            >
+            <label>
               Role
             </label>
-
             <select
               className="search-input"
               name="role"
               value={form.role}
               onChange={handleChange}
             >
-              <option value="ADMIN">
-                ADMIN
-              </option>
-
-              <option value="SUPPLY_CHAIN_MANAGER">
-                SUPPLY_CHAIN_MANAGER
-              </option>
-
-              <option value="SUPPLIER">
-                SUPPLIER
-              </option>
+              <option value="ADMIN">ADMIN</option>
+              <option value="SUPPLY_CHAIN_MANAGER">SUPPLY_CHAIN_MANAGER</option>
+              <option value="SUPPLIER">SUPPLIER</option>
             </select>
           </div>
 
-
           {/* CREATE BUTTON */}
-
           <div>
-
             <button
               type="submit"
               className="primary-button"
               disabled={submitting}
-              style={{
-                width: "100%",
-              }}
+              style={{ width: "100%", height: "42px" }}
             >
-              {submitting
-                ? "Creating..."
-                : "Create User"}
+              {submitting ? "Creating..." : "Create User"}
             </button>
-
           </div>
 
         </form>
 
-
         {/* SUPPLIER ID INFORMATION */}
-
         {form.role === "SUPPLIER" && (
           <div
             style={{
               marginTop: "14px",
-              padding: "10px 12px",
-              borderRadius: "6px",
-              background:
-                "rgba(59, 130, 246, 0.08)",
-              border:
-                "1px solid rgba(59, 130, 246, 0.25)",
-              fontSize: "13px",
-              opacity: 0.9,
+              padding: "10px 14px",
+              borderRadius: "8px",
+              background: "rgba(212, 175, 55, 0.08)",
+              border: "1px solid rgba(212, 175, 55, 0.25)",
+              fontSize: "12px",
+              color: "#D4AF37",
+              fontWeight: 550,
             }}
           >
-            Supplier ID will be generated
-            automatically by the system.
+            ℹ Supplier ID will be generated automatically by the system.
           </div>
         )}
 

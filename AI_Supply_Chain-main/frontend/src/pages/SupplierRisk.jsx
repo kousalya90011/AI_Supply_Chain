@@ -32,6 +32,8 @@ function SupplierRisk() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [riskFilter, setRiskFilter] = useState("ALL");
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
 
   async function loadSupplierRisk() {
     try {
@@ -79,6 +81,23 @@ function SupplierRisk() {
       return matchesSearch && matchesRisk;
     });
   }, [supplierRisk, searchTerm, riskFilter]);
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, riskFilter, pageSize]);
+
+  const totalPages =
+    pageSize === "ALL"
+      ? 1
+      : Math.max(1, Math.ceil(filteredSuppliers.length / Number(pageSize)));
+
+  const displayedSuppliers = useMemo(() => {
+    if (pageSize === "ALL") return filteredSuppliers;
+    const size = Number(pageSize);
+    const start = (currentPage - 1) * size;
+    return filteredSuppliers.slice(start, start + size);
+  }, [filteredSuppliers, currentPage, pageSize]);
 
   const chartData = useMemo(() => {
     return [...supplierRisk]
@@ -358,7 +377,7 @@ function SupplierRisk() {
 
                 <Bar
                   dataKey="score"
-                  fill="#334155"
+                  fill="#D4AF37"
                   radius={[0, 4, 4, 0]}
                   barSize={16}
                 />
@@ -414,6 +433,24 @@ function SupplierRisk() {
               <option value="LOW">Low</option>
             </select>
 
+            <select
+              value={pageSize}
+              onChange={(e) =>
+                setPageSize(
+                  e.target.value === "ALL"
+                    ? "ALL"
+                    : Number(e.target.value)
+                )
+              }
+              className="risk-filter"
+              aria-label="Suppliers per page"
+            >
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+              <option value="ALL">Show all ({supplierRisk.length})</option>
+            </select>
+
           </div>
 
         </div>
@@ -442,7 +479,7 @@ function SupplierRisk() {
               </thead>
 
               <tbody>
-                {filteredSuppliers.map((supplier) => (
+                {displayedSuppliers.map((supplier) => (
                   <tr key={supplier.supplier_id}>
 
                     <td>
@@ -528,6 +565,73 @@ function SupplierRisk() {
               </tbody>
 
             </table>
+
+            {/* PAGINATION / POPULATION FOOTER */}
+            <div className="table-pagination-footer" style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 18px",
+              borderTop: "1px solid var(--border)",
+              background: "#151515",
+              flexWrap: "wrap",
+              gap: "12px",
+              fontSize: "12px",
+              color: "var(--text-secondary)"
+            }}>
+              <span className="pagination-count-summary">
+                Showing{" "}
+                <strong>
+                  {filteredSuppliers.length === 0
+                    ? 0
+                    : (currentPage - 1) *
+                        (pageSize === "ALL"
+                          ? filteredSuppliers.length
+                          : Number(pageSize)) +
+                      1}
+                </strong>
+                –
+                <strong>
+                  {Math.min(
+                    currentPage *
+                      (pageSize === "ALL"
+                        ? filteredSuppliers.length
+                        : Number(pageSize)),
+                    filteredSuppliers.length
+                  )}
+                </strong>{" "}
+                of <strong>{filteredSuppliers.length}</strong> suppliers displayed
+                {filteredSuppliers.length < supplierRisk.length
+                  ? ` (filtered from ${supplierRisk.length} total evaluated)`
+                  : ` (${supplierRisk.length} total evaluated)`}
+              </span>
+
+              {totalPages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button
+                    className="secondary-button"
+                    style={{ padding: "5px 12px", fontSize: "12px" }}
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  >
+                    ‹ Previous
+                  </button>
+                  <span style={{ padding: "0 6px", fontWeight: "600" }}>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    className="secondary-button"
+                    style={{ padding: "5px 12px", fontSize: "12px" }}
+                    disabled={currentPage >= totalPages}
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                  >
+                    Next ›
+                  </button>
+                </div>
+              )}
+            </div>
 
           </div>
         )}

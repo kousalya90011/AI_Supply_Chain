@@ -169,14 +169,15 @@ function OffersPage({ auth, mode }) {
       {error && <ErrorMessage title="Offer Action Error" message={error} onRetry={loadOffers} />}
 
       {actionSuccess && (
-        <div className="system-card" style={{ marginBottom: "16px", borderColor: "rgba(34, 197, 94, 0.4)", background: "rgba(34, 197, 94, 0.08)" }}>
-          <strong style={{ color: "#22c55e" }}>{actionSuccess}</strong>
+        <div className="success-banner">
+          <span style={{ fontSize: "16px" }}>✓</span>
+          <strong>{actionSuccess}</strong>
         </div>
       )}
 
       {/* Supplier Create Offer Form */}
       {isSupplier && (
-        <section className="investigation-card" style={{ marginBottom: "20px" }}>
+        <section className="investigation-card" style={{ marginBottom: "24px" }}>
           <div className="section-header">
             <div>
               <span className="section-eyebrow">CREATE OFFER</span>
@@ -184,9 +185,9 @@ function OffersPage({ auth, mode }) {
             </div>
           </div>
 
-          <form onSubmit={handleCreate} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", alignItems: "end" }}>
+          <form onSubmit={handleCreate} className="form-grid">
             <div>
-              <label style={{ fontSize: "12px", opacity: 0.8, display: "block", marginBottom: "4px" }}>Product ID</label>
+              <label>Product ID</label>
               <input
                 className="search-input"
                 value={createForm.product_id}
@@ -196,7 +197,7 @@ function OffersPage({ auth, mode }) {
               />
             </div>
             <div>
-              <label style={{ fontSize: "12px", opacity: 0.8, display: "block", marginBottom: "4px" }}>Quantity</label>
+              <label>Quantity</label>
               <input
                 className="search-input"
                 type="number"
@@ -208,7 +209,7 @@ function OffersPage({ auth, mode }) {
               />
             </div>
             <div>
-              <label style={{ fontSize: "12px", opacity: 0.8, display: "block", marginBottom: "4px" }}>Unit Price ($)</label>
+              <label>Unit Price ($)</label>
               <input
                 className="search-input"
                 type="number"
@@ -221,7 +222,7 @@ function OffersPage({ auth, mode }) {
               />
             </div>
             <div>
-              <label style={{ fontSize: "12px", opacity: 0.8, display: "block", marginBottom: "4px" }}>Delivery Days</label>
+              <label>Delivery Days</label>
               <input
                 className="search-input"
                 type="number"
@@ -233,7 +234,7 @@ function OffersPage({ auth, mode }) {
               />
             </div>
             <div>
-              <label style={{ fontSize: "12px", opacity: 0.8, display: "block", marginBottom: "4px" }}>Valid Until</label>
+              <label>Valid Until</label>
               <input
                 className="search-input"
                 type="date"

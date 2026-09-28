@@ -204,7 +204,7 @@ function Anomalies() {
 
               <Bar
                 dataKey="value"
-                fill="#2563eb"
+                fill="#D4AF37"
                 radius={[6, 6, 0, 0]}
               />
 

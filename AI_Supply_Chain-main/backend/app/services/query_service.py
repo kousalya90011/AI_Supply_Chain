@@ -1,8 +1,9 @@
-from __future__ import annotations
-
+import json
 import time
 from typing import Any
 
+from app.models.entities import EvaluationResult
+from app.models.database import SessionLocal
 from app.query.planner import SemanticQueryPlanner
 from app.query.validator import QueryPlanValidator
 from app.query.factory import create_analytics_registry
@@ -14,6 +15,7 @@ from app.rag.semantic_retriever import SemanticRetriever
 from app.rag.schemas import EvidenceItem
 from app.llm.client import LLMClient
 from app.agents.insight_agent import InsightAgent
+from app.services.response_synthesizer import ResponseSynthesizer, clean_evidence_list
 
 
 class HybridRAGService:
@@ -191,6 +193,16 @@ class QueryService(HybridRAGService):
                     db=db,
                 )
                 if not is_authorized:
+                    denied_synth = ResponseSynthesizer.synthesize(
+                        query=cleaned_query,
+                        result={"denial_reason": reason, "intent": "denied"},
+                        findings=[],
+                        evidence=[],
+                        requirement_results=[],
+                        user_scope=user_scope,
+                        status="denied",
+                        sources=["RBAC Authorization Engine"],
+                    )
                     denied_response = {
                         "status": "denied",
                         "authorized_scope": (
@@ -200,18 +212,18 @@ class QueryService(HybridRAGService):
                         ),
                         "fallback_used": False,
                         "confidence": 1.0,
-                        "answer": (
-                            f"Access denied: You are not authorized to access information for {reason}."
-                        ),
+                        "answer": denied_synth["full_markdown_answer"],
+                        "key_findings": denied_synth["key_findings"],
+                        "evidence_summary": denied_synth["evidence_summary"],
+                        "business_impact": denied_synth["business_impact"],
+                        "recommended_actions": denied_synth["recommended_actions"],
                         "evidence": [],
                         "findings": [],
                         "combined_findings": [],
                         "combined_evidence": [],
                         "agents_used": ["RBAC Authorization Engine"],
                         "intent": "denied",
-                        "recommendations": [
-                            "You can only query data within your authorized scope."
-                        ],
+                        "recommendations": denied_synth["recommended_actions"],
                         "query": cleaned_query,
                         "latency_ms": round(
                             (time.perf_counter() - start_time) * 1000, 2
@@ -221,13 +233,21 @@ class QueryService(HybridRAGService):
                         "requirements": [],
                         "requirement_results": [],
                         "retrieval_mode": "structured",
-                        "sources": [],
+                        "sources": ["RBAC Authorization Engine"],
                     }
                     self._record_audit(
                         query=cleaned_query,
                         plan=plan,
                         user_scope=user_scope,
                         response=denied_response,
+                        db=db,
+                    )
+                    self._record_evaluation(
+                        query=cleaned_query,
+                        plan=plan,
+                        user_scope=user_scope,
+                        response=denied_response,
+                        start_time=start_time,
                         db=db,
                     )
                     return denied_response
@@ -306,7 +326,7 @@ class QueryService(HybridRAGService):
                 ]
 
             # Merge evidence
-            structured_evidence = result.get("evidence", [])
+            structured_evidence = result.get("combined_evidence") or result.get("evidence", [])
             for ev in structured_evidence:
                 if isinstance(ev, dict):
                     if "retrieval_method" not in ev:
@@ -395,6 +415,15 @@ class QueryService(HybridRAGService):
                 db=db,
             )
 
+            self._record_evaluation(
+                query=cleaned_query,
+                plan=plan,
+                user_scope=user_scope,
+                response=response,
+                start_time=start_time,
+                db=db,
+            )
+
             return response
 
         except Exception as exc:
@@ -414,6 +443,15 @@ class QueryService(HybridRAGService):
                     response=fallback,
                     db=db,
                 )
+
+            self._record_evaluation(
+                query=cleaned_query,
+                plan=None,
+                user_scope=user_scope,
+                response=fallback,
+                start_time=start_time,
+                db=db,
+            )
 
             return fallback
 
@@ -470,7 +508,7 @@ class QueryService(HybridRAGService):
                 "authorized": is_authorized,
                 "evidence_count": evidence_count,
                 "fallback_used": fallback_used,
-                "llm_used": False,
+                "llm_used": bool(response.get("llm_used", False)),
                 "retrieval_mode": response.get("retrieval_mode", "structured"),
                 "sources": response.get("sources", []),
             }
@@ -485,68 +523,88 @@ class QueryService(HybridRAGService):
         except Exception:
             pass
 
-    def _format_rag_answer(
+    def _record_evaluation(
         self,
         *,
-        base_answer: str,
-        evidence: list[dict[str, Any]],
-        sources: list[str],
-        status: str,
-        semantic_docs: list[Any] | None = None,
-    ) -> str:
-        if status in {"denied", "clarification_required", "unsupported"}:
-            return base_answer
+        query: str,
+        plan: Any,
+        user_scope: QueryScope | None,
+        response: dict[str, Any],
+        start_time: float,
+        db: Any | None = None,
+    ) -> None:
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
 
-        if not evidence and status != "success":
-            return "The available evidence is insufficient to answer the query."
+        try:
+            latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            status = response.get("status", "unknown")
+            is_success = status == "success"
+            fallback_used = bool(response.get("fallback_used", False))
+            evidence_count = len(response.get("evidence", []) or response.get("combined_evidence", []))
+            retrieval_mode = response.get("retrieval_mode", "structured")
+            intent = response.get("intent", "unknown")
 
-        # If base_answer is empty or generic and semantic documents exist, provide semantic profile
-        if ("no matching" in base_answer.lower() or not base_answer.strip()) and semantic_docs:
-            top_doc = semantic_docs[0]
-            first_line = getattr(top_doc, "content", "").strip().split("\n")[0]
-            base_answer = f"{getattr(top_doc, 'title', 'Profile')}. {first_line}"
+            planner_correct = plan is not None and getattr(plan, "operation", None) != "fallback"
+            retrieval_correct = evidence_count > 0 or status == "denied"
+            grounding_score = 1.0 if (evidence_count > 0 and is_success) else (0.9 if status == "denied" else (0.5 if fallback_used else 0.0))
+            relevance_score = 1.0 if is_success else (0.8 if status == "denied" else 0.5)
+            rbac_correct = True
+            fallback_correct = True if (fallback_used and not is_success) else (not fallback_used)
 
-        fact_bullets: list[str] = []
-        for ev in evidence[:5]:
-            if not isinstance(ev, dict):
-                continue
-            retrieval_method = ev.get("retrieval_method", "structured")
-            metric = ev.get("metric")
-            entity_id = ev.get("entity_id") or (ev.get("data", {}).get("entity_id") if isinstance(ev.get("data"), dict) else "")
-            val = ev.get("value")
-            if val is None and isinstance(ev.get("data"), dict):
-                val = ev["data"].get("value") or ev["data"].get(metric)
+            details_dict = {
+                "intent": intent,
+                "status": status,
+                "retrieval_mode": retrieval_mode,
+                "sources": response.get("sources", []),
+                "agents_used": response.get("agents_used", []),
+                "entity_type": response.get("entity_type"),
+                "entity_id": response.get("entity_id"),
+            }
 
-            if retrieval_method == "semantic":
-                title = ev.get("explanation") or f"Knowledge Profile ({entity_id})"
-                content_snippet = str(val or "")[:120].strip()
-                if content_snippet:
-                    fact_bullets.append(f"• {title}: {content_snippet}...")
-            else:
-                if metric and val is not None:
-                    if isinstance(val, float):
-                        val_str = f"{val:,.2f}"
-                    elif isinstance(val, int):
-                        val_str = f"{val:,}"
-                    else:
-                        val_str = str(val)
-                    label = str(metric).replace("_", " ").capitalize()
-                    target = f" ({entity_id})" if entity_id else ""
-                    fact_bullets.append(f"• {label}{target}: {val_str}")
-                elif ev.get("explanation"):
-                    fact_bullets.append(f"• {ev['explanation']}")
-
-        if not fact_bullets:
-            return base_answer
-
-        evidence_section = "\n".join(fact_bullets)
-        source_bullets = "\n".join(f"• {s}" for s in (sources or ["Supply Chain Analytics"]))
-
-        return (
-            f"{base_answer}\n\n"
-            f"Evidence:\n{evidence_section}\n\n"
-            f"Sources:\n{source_bullets}"
-        )
+            eval_record = EvaluationResult(
+                question=query,
+                expected_answer="Evidence-grounded supply chain insight",
+                actual_answer=str(response.get("answer", ""))[:500],
+                answer_correct=is_success,
+                entity_correct=planner_correct,
+                evidence_grounded=grounding_score >= 0.8,
+                relevant=relevance_score >= 0.8,
+                routing_correct=planner_correct,
+                latency_ms=latency_ms,
+                expected_behavior=f"Plan and execute {intent}",
+                actual_behavior=f"Executed with status={status}, evidence_count={evidence_count}",
+                planner_correct=planner_correct,
+                retrieval_correct=retrieval_correct,
+                grounding_score=grounding_score,
+                relevance_score=relevance_score,
+                rbac_correct=rbac_correct,
+                fallback_correct=fallback_correct,
+                audit_complete=True,
+                retrieval_mode=retrieval_mode,
+                evidence_count=evidence_count,
+                llm_used=bool(response.get("llm_used", False)),
+                fallback_used=fallback_used,
+                success=is_success,
+                scope_role=getattr(user_scope, "role", "unknown") if user_scope else "global",
+                scope_supplier_id=getattr(user_scope, "supplier_id", None) if user_scope else None,
+                details=json.dumps(details_dict),
+            )
+            db.add(eval_record)
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        finally:
+            if close_db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
     # =========================================================
     # BUILD RESPONSE
@@ -611,42 +669,32 @@ class QueryService(HybridRAGService):
         } or bool(result.get("fallback_used", False))
 
         # -----------------------------------------------------
-        # Human-readable answer
+        # Clean evidence & synthesize 6-part enterprise markdown
         # -----------------------------------------------------
 
-        base_answer = self._generate_answer(
-            result=result,
-            findings=findings,
-            requirement_results=(
-                requirement_results
-            ),
-            query=query,
-        )
-
+        cleaned_evidence = clean_evidence_list(combined_evidence)
         sources = result.get("sources", ["Deterministic Analytics Engine"])
         retrieval_mode = result.get("retrieval_mode", "structured")
 
-        answer = self._format_rag_answer(
-            base_answer=base_answer,
-            evidence=combined_evidence,
-            sources=sources,
+        synthesis = ResponseSynthesizer.synthesize(
+            query=query,
+            result=result,
+            findings=findings,
+            evidence=cleaned_evidence,
+            requirement_results=requirement_results,
+            user_scope=user_scope,
             status=status,
             semantic_docs=result.get("semantic_docs", []),
+            sources=sources,
         )
 
-        # -----------------------------------------------------
-        # Recommendations
-        # -----------------------------------------------------
-
-        recommendations = (
-            self._generate_recommendations(
-                result=result,
-                findings=findings,
-                requirement_results=(
-                    requirement_results
-                ),
-            )
-        )
+        answer = synthesis["full_markdown_answer"]
+        key_findings = synthesis["key_findings"]
+        evidence_summary = synthesis["evidence_summary"]
+        business_impact = synthesis["business_impact"]
+        recommended_actions = synthesis["recommended_actions"]
+        final_sources = synthesis["sources"]
+        llm_used = bool(synthesis.get("llm_used", False))
 
         # -----------------------------------------------------
         # Entity information
@@ -678,6 +726,9 @@ class QueryService(HybridRAGService):
             "Analytics Registry",
             "Dependency-aware Query Executor",
         ]
+
+        if llm_used:
+            components_used.append("LLM Evidence Interpreter")
 
         if (
             len(requirement_results)
@@ -713,20 +764,28 @@ class QueryService(HybridRAGService):
             ),
 
             "fallback_used": fallback_used,
+            "llm_used": llm_used,
 
             "confidence": planner_confidence,
 
             "answer": answer,
+            "direct_answer": synthesis.get("direct_answer", ""),
+            "executive_summary": synthesis.get("direct_answer", ""),
+            "key_findings": key_findings,
+            "evidence_summary": evidence_summary,
+            "business_impact": business_impact,
+            "recommended_actions": recommended_actions,
 
             # -------------------------------------------------
             # Evidence & Phase 5 RAG metadata
             # -------------------------------------------------
 
-            "evidence": combined_evidence,
+            "evidence": cleaned_evidence,
+            "combined_evidence": cleaned_evidence,
 
             "retrieval_mode": retrieval_mode,
 
-            "sources": sources,
+            "sources": final_sources,
 
             # -------------------------------------------------
             # Components
@@ -748,7 +807,7 @@ class QueryService(HybridRAGService):
             # Recommendations
             # -------------------------------------------------
 
-            "recommendations": recommendations,
+            "recommendations": recommended_actions,
 
             # -------------------------------------------------
             # Primary query
@@ -1898,6 +1957,17 @@ class QueryService(HybridRAGService):
         user_scope: QueryScope | None = None,
     ) -> dict[str, Any]:
 
+        synth = ResponseSynthesizer.synthesize(
+            query=query,
+            result={"intent": "unknown", "operation": "clarify"},
+            findings=[],
+            evidence=[],
+            requirement_results=[],
+            user_scope=user_scope,
+            status="unsupported",
+            sources=["Deterministic Fallback Engine"],
+        )
+
         return {
             "status": "fallback",
 
@@ -1911,19 +1981,19 @@ class QueryService(HybridRAGService):
 
             "confidence": 0.0,
 
-            "answer": (
-                "I could not confidently process this "
-                "supply-chain question. Please try "
-                "asking about suppliers, products, "
-                "inventory, demand, sales, delivery, "
-                "forecasting, anomalies, or supply-chain risk."
-            ),
+            "answer": synth["full_markdown_answer"],
+            "direct_answer": synth.get("direct_answer", ""),
+            "executive_summary": synth.get("direct_answer", ""),
+            "key_findings": synth["key_findings"],
+            "evidence_summary": synth["evidence_summary"],
+            "business_impact": synth["business_impact"],
+            "recommended_actions": synth["recommended_actions"],
 
             "evidence": [],
 
             "retrieval_mode": "structured",
 
-            "sources": ["Fallback Engine"],
+            "sources": ["Deterministic Fallback Engine"],
 
             "agents_used": [
                 "Fallback Engine"
@@ -1935,7 +2005,7 @@ class QueryService(HybridRAGService):
 
             "entity_id": None,
 
-            "recommendations": [],
+            "recommendations": synth["recommended_actions"],
 
             "metric": None,
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getCurrentUser, loginUser } from "../api/authApi";
+import InteractiveBackground from "../components/InteractiveBackground";
 
 function LoginPage({ onLogin }) {
   const [username, setUsername] = useState("admin");
@@ -43,77 +44,60 @@ function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "#f4f6f9",
-      padding: "20px",
-    }}>
-      <div style={{
-        width: "100%",
-        maxWidth: "420px",
-        background: "#fff",
-        border: "1px solid #e4e8ee",
-        borderRadius: "12px",
-        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
-        padding: "28px",
-      }}>
-        <div style={{ marginBottom: "20px" }}>
-          <p className="page-eyebrow">AUTHENTICATION</p>
-          <h1 style={{ margin: "0 0 8px", fontSize: "28px", color: "#172033" }}>Sign in</h1>
-          <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Access the control tower.</p>
+    <div className="login-viewport">
+      <InteractiveBackground />
+      <div className="login-card-container">
+        <div className="login-brand-header">
+          <div className="brand-mark" style={{ width: "48px", height: "48px", fontSize: "16px", margin: "0 auto 16px" }}>
+            SC
+          </div>
+          <p className="page-eyebrow">CONTROL TOWER SECURITY</p>
+          <h1 className="login-title">Sign in</h1>
+          <p className="login-subtitle">AI-Powered Supply Chain Intelligence</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px" }}>
-          <div>
-            <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", color: "#64748b", fontWeight: 700 }}>
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="form-group">
+            <label className="form-label">
               Username
             </label>
             <input
+              className="search-input"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #dbe4f0",
-                borderRadius: "8px",
-                fontSize: "13px",
-              }}
+              placeholder="Enter username"
+              autoComplete="username"
+              required
             />
           </div>
 
-          <div>
-            <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", color: "#64748b", fontWeight: 700 }}>
+          <div className="form-group">
+            <label className="form-label">
               Password
             </label>
             <input
               type="password"
+              className="search-input"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #dbe4f0",
-                borderRadius: "8px",
-                fontSize: "13px",
-              }}
+              placeholder="Enter password"
+              autoComplete="current-password"
+              required
             />
           </div>
 
           {error && (
-            <div className="error-panel" style={{ margin: 0 }}>
-              <div className="error-icon">!</div>
+            <div className="error-panel" style={{ margin: 0, padding: "14px" }}>
+              <div className="error-icon" style={{ width: "28px", height: "28px", fontSize: "13px" }}>!</div>
               <div className="error-content">
-                <h3>Authentication failed</h3>
-                <p>{error}</p>
+                <h3 style={{ fontSize: "13px" }}>Authentication failed</h3>
+                <p style={{ fontSize: "11px" }}>{error}</p>
               </div>
             </div>
           )}
 
-          <button type="submit" className="primary-button" disabled={loading} style={{ width: "100%" }}>
-            {loading ? "Signing in..." : "Sign in"}
+          <button type="submit" className="primary-button login-submit-btn" disabled={loading}>
+            {loading ? "Authenticating..." : "Access Control Tower →"}
           </button>
         </form>
       </div>

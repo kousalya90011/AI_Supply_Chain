@@ -117,6 +117,7 @@ function Evaluation() {
   const [summary, setSummary] = useState(null);
   const [routing, setRouting] = useState(null);
   const [evalResults, setEvalResults] = useState([]);
+  const [selectedEval, setSelectedEval] = useState(null);
 
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] =
@@ -760,31 +761,31 @@ function Evaluation() {
                   {
                     name: "Structured",
                     count: summary?.retrieval_distribution?.structured ?? summary?.structured_query_count ?? 0,
-                    fill: "#3b82f6",
+                    fill: "#D4AF37",
                   },
                   {
                     name: "Semantic",
                     count: summary?.retrieval_distribution?.semantic ?? summary?.semantic_query_count ?? 0,
-                    fill: "#8b5cf6",
+                    fill: "#E5C45A",
                   },
                   {
                     name: "Hybrid",
                     count: summary?.retrieval_distribution?.hybrid ?? summary?.hybrid_query_count ?? 0,
-                    fill: "#06b6d4",
+                    fill: "#888888",
                   },
                 ]}
                 margin={{ top: 10, right: 20, left: -20, bottom: 0 }}
               >
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#888888" }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#888888" }} />
                 <Tooltip
                   formatter={(val) => [`${val} queries`, "Count"]}
-                  contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", color: "#f8fafc", borderRadius: "8px", fontSize: "12px" }}
+                  contentStyle={{ backgroundColor: "#151515", borderColor: "#292929", color: "#F5F5F5", borderRadius: "8px", fontSize: "12px" }}
                 />
                 <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  <Cell fill="#3b82f6" />
-                  <Cell fill="#8b5cf6" />
-                  <Cell fill="#06b6d4" />
+                  <Cell fill="#D4AF37" />
+                  <Cell fill="#E5C45A" />
+                  <Cell fill="#888888" />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -823,7 +824,7 @@ function Evaluation() {
 
         <div className="evaluation-table-wrapper">
           {evalResults.length === 0 ? (
-            <div style={{ padding: "30px", textAlign: "center", color: "#64748b", fontSize: "12px" }}>
+            <div style={{ padding: "30px", textAlign: "center", color: "#777777", fontSize: "12px" }}>
               No evaluation records stored yet. Click "Run Evaluation" above to execute the benchmark suite.
             </div>
           ) : (
@@ -850,13 +851,13 @@ function Evaluation() {
 
                   return (
                     <tr key={item.id || index}>
-                      <td style={{ fontWeight: 600, color: "#0f172a", maxWidth: "220px", whiteSpace: "normal" }}>
+                      <td style={{ fontWeight: 600, color: "#F5F5F5", maxWidth: "220px", whiteSpace: "normal" }}>
                         {item.query}
                       </td>
-                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#64748b" }}>
+                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#B8B8B8" }}>
                         {item.expected_behavior || "—"}
                       </td>
-                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#475569" }}>
+                      <td style={{ maxWidth: "180px", whiteSpace: "normal", color: "#A0A0A0" }}>
                         {item.actual_behavior || "—"}
                       </td>
                       <td>
@@ -1131,6 +1132,149 @@ function Evaluation() {
 
       </section>
 
+      {/* =================================================
+          EVALUATION HISTORY TABLE
+      ================================================= */}
+      <section className="evaluation-section evaluation-history-section">
+        <div className="evaluation-section-heading">
+          <div>
+            <span className="evaluation-section-eyebrow">HISTORICAL RUNS</span>
+            <h2>Evaluation History</h2>
+            <p className="evaluation-section-description">
+              Trace evaluation results across all user and automated queries, measuring latency, retrieval mode, grounding, and relevance.
+            </p>
+          </div>
+          <span className="evaluation-count-badge">
+            {evalResults.length} records
+          </span>
+        </div>
+
+        {evalResults.length === 0 ? (
+          <div className="evaluation-empty-history">
+            <p>No evaluation records found yet. Query the AI Assistant or click "Run Evaluation" above to generate benchmark traces.</p>
+          </div>
+        ) : (
+          <div className="evaluation-table-wrapper">
+            <table className="evaluation-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Query</th>
+                  <th>Intent</th>
+                  <th>Retrieval</th>
+                  <th>Grounding</th>
+                  <th>Relevance</th>
+                  <th>Latency</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evalResults.map((item, idx) => {
+                  const intent = item?.details?.intent || item?.intent || "—";
+                  const grounding = item?.grounding_score !== undefined && item?.grounding_score !== null ? `${(item.grounding_score * 100).toFixed(0)}%` : "—";
+                  const relevance = item?.relevance_score !== undefined && item?.relevance_score !== null ? `${(item.relevance_score * 100).toFixed(0)}%` : "—";
+                  const latency = item?.latency_ms !== undefined && item?.latency_ms !== null ? `${Number(item.latency_ms).toFixed(0)} ms` : "—";
+                  const isSuccess = item?.success ?? true;
+
+                  return (
+                    <tr key={item?.id || idx}>
+                      <td>
+                        <span className="eval-cell-timestamp">
+                          {item?.created_at ? new Date(item.created_at).toLocaleTimeString() : "Just now"}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="eval-cell-query">
+                          <strong>{item?.query || "—"}</strong>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="eval-badge eval-badge-intent">
+                          {String(intent).replaceAll("_", " ")}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="eval-badge eval-badge-retrieval">
+                          {item?.retrieval_mode || "structured"}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="eval-score-text">{grounding}</span>
+                      </td>
+                      <td>
+                        <span className="eval-score-text">{relevance}</span>
+                      </td>
+                      <td>
+                        <span className="eval-latency-text">{latency}</span>
+                      </td>
+                      <td>
+                        <span className={`eval-badge eval-badge-status ${isSuccess ? "status-success" : "status-failed"}`}>
+                          {isSuccess ? "Pass" : "Fail"}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="eval-detail-btn"
+                          onClick={() => setSelectedEval(selectedEval?.id === item.id ? null : item)}
+                        >
+                          {selectedEval?.id === item.id ? "Hide" : "Details"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Selected Evaluation Detail Panel */}
+        {selectedEval && (
+          <div className="evaluation-detail-panel">
+            <div className="evaluation-detail-header">
+              <h3>Evaluation Record #{selectedEval.id}</h3>
+              <button
+                type="button"
+                className="evaluation-detail-close"
+                onClick={() => setSelectedEval(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="evaluation-detail-grid">
+              <div>
+                <span className="eval-detail-label">Query</span>
+                <p className="eval-detail-value">{selectedEval.query || "—"}</p>
+              </div>
+              <div>
+                <span className="eval-detail-label">Actual Response Preview</span>
+                <p className="eval-detail-value">{selectedEval.actual_behavior || "—"}</p>
+              </div>
+              <div>
+                <span className="eval-detail-label">Metrics Breakdown</span>
+                <div className="eval-detail-chips">
+                  <span>Retrieval: <strong>{selectedEval.retrieval_mode}</strong></span>
+                  <span>Grounding: <strong>{selectedEval.grounding_score !== undefined ? `${(selectedEval.grounding_score * 100).toFixed(0)}%` : "—"}</strong></span>
+                  <span>Relevance: <strong>{selectedEval.relevance_score !== undefined ? `${(selectedEval.relevance_score * 100).toFixed(0)}%` : "—"}</strong></span>
+                  <span>Latency: <strong>{selectedEval.latency_ms} ms</strong></span>
+                  <span>LLM Used: <strong>{selectedEval.llm_used ? "Yes" : "No"}</strong></span>
+                  <span>Fallback: <strong>{selectedEval.fallback_used ? "Yes" : "No"}</strong></span>
+                </div>
+              </div>
+              {selectedEval.details && (
+                <div>
+                  <span className="eval-detail-label">Trace & Metadata</span>
+                  <pre className="eval-detail-json">
+                    {JSON.stringify(selectedEval.details, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* =================================================
           INTERPRETATION
