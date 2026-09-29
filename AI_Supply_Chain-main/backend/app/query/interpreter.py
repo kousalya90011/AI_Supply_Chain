@@ -925,8 +925,8 @@ class SemanticQueryInterpreter:
             }
 
         if (
-            ("which products" in norm_text or "products supplied" in norm_text or "products does" in norm_text or "supplies" in norm_text)
-            and primary_entity_id and primary_entity_id.startswith("S")
+            ("which products" in norm_text or "products supplied" in norm_text or "products does" in norm_text or "supplies" in norm_text or "products do i supply" in norm_text or "do i supply" in norm_text or "my products" in norm_text)
+            and (primary_entity_id and primary_entity_id.startswith("S") or "do i supply" in norm_text or "my products" in norm_text or "i supply" in norm_text)
         ):
             return {
                 "intent": "supplier_relationship_analysis",
@@ -1290,6 +1290,59 @@ class SemanticQueryInterpreter:
                 ],
                 "method": "semantic_delivery",
             }
+
+        # ---------------------------------------------------------------------
+        # 11. ENTITY PROFILE / OVERVIEW (tell me about X, details for X, what about X)
+        # ---------------------------------------------------------------------
+        if primary_entity_id:
+            if primary_entity_id.startswith("P"):
+                return {
+                    "intent": "product_profile",
+                    "domain": "product",
+                    "metric": "product_profile",
+                    "operation": "summarize",
+                    "direction": "none",
+                    "entity": "product",
+                    "entity_id": primary_entity_id,
+                    "entity_ids": entity_ids,
+                    "confidence": 0.95,
+                    "requirements": [
+                        {
+                            "domain": "product",
+                            "operation": "summarize",
+                            "metric": "product_profile",
+                            "direction": "none",
+                            "entity": "product",
+                            "entity_id": primary_entity_id,
+                            "depends_on": None,
+                        }
+                    ],
+                    "method": "semantic_product_profile",
+                }
+            elif primary_entity_id.startswith("S"):
+                return {
+                    "intent": "supplier_risk",
+                    "domain": "supplier",
+                    "metric": "late_rate",
+                    "operation": "summarize",
+                    "direction": "none",
+                    "entity": "supplier",
+                    "entity_id": primary_entity_id,
+                    "entity_ids": entity_ids,
+                    "confidence": 0.95,
+                    "requirements": [
+                        {
+                            "domain": "supplier",
+                            "operation": "summarize",
+                            "metric": "late_rate",
+                            "direction": "none",
+                            "entity": "supplier",
+                            "entity_id": primary_entity_id,
+                            "depends_on": None,
+                        }
+                    ],
+                    "method": "semantic_supplier_profile",
+                }
 
         # Fallback to clarify
         return {

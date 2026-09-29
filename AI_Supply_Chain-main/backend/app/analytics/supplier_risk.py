@@ -90,22 +90,16 @@ class SupplierRiskAnalyzer:
                 on="supplier_id",
                 how="left"
             )
-            avg_delay = supplier.get(
-                "avg_delay",
-                pd.Series(0, index=supplier.index)
-            ).fillna(0)
-            std_lead = supplier.get(
-                "std_lead_time",
-                pd.Series(0, index=supplier.index)
-            ).fillna(0)
-            disr_rate = supplier.get(
-                "disruption_rate",
-                pd.Series(0, index=supplier.index)
-            ).fillna(0)
+            supplier["avg_delay"] = supplier["avg_delay"].fillna(0.0)
+            supplier["std_lead_time"] = supplier["std_lead_time"].fillna(0.0)
+            supplier["disruption_rate"] = supplier["disruption_rate"].fillna(0.0)
+            if "avg_lead_time" in supplier.columns:
+                supplier["avg_lead_time"] = supplier["avg_lead_time"].fillna(0.0)
+
             supplier["lead_time_risk"] = (
-                (avg_delay * 6.0)
-                + (std_lead * 3.5)
-                + (disr_rate * 40.0)
+                (supplier["avg_delay"] * 6.0)
+                + (supplier["std_lead_time"] * 3.5)
+                + (supplier["disruption_rate"] * 40.0)
             ).clip(0.0, 100.0)
         else:
             supplier["lead_time_risk"] = 0.0
@@ -143,6 +137,8 @@ class SupplierRiskAnalyzer:
                 .round(3)
                 .astype(str)
             )
+
+        supplier = supplier.replace([np.inf, -np.inf], np.nan).fillna(0)
 
         return supplier.sort_values(
             "risk_score",

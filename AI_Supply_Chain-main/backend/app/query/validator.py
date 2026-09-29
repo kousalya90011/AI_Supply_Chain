@@ -38,6 +38,8 @@ ALLOWED_METRICS = {
     "delivery_analysis",
     "on_time_rate",
     "late_orders",
+    "product_profile",
+    "product_details",
 }
 
 

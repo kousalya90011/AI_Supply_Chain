@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { getOffers, createOffer, updateOffer, acceptOffer, rejectOffer, withdrawOffer, deleteOffer } from "../api/offersApi";
+import { getProducts } from "../api/productsApi";
 import Loading from "../components/Loading";
 import ErrorMessage from "../components/ErrorMessage";
 import EmptyState from "../components/EmptyState";
 
 function OffersPage({ auth, mode }) {
   const [offers, setOffers] = useState([]);
+  const [approvedProducts, setApprovedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
@@ -57,8 +59,19 @@ function OffersPage({ auth, mode }) {
     }
   };
 
+  const loadApprovedProducts = async () => {
+    if (!isSupplier) return;
+    try {
+      const prods = await getProducts();
+      setApprovedProducts(prods?.filter((p) => p.approval_status === "APPROVED") || []);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     loadOffers();
+    loadApprovedProducts();
   }, [filters.status]);
 
   const handleApplyFilter = (e) => {
@@ -187,14 +200,41 @@ function OffersPage({ auth, mode }) {
 
           <form onSubmit={handleCreate} className="form-grid">
             <div>
-              <label>Product ID</label>
-              <input
-                className="search-input"
-                value={createForm.product_id}
-                onChange={(e) => setCreateForm({ ...createForm, product_id: e.target.value })}
-                placeholder="e.g. P00003"
-                required
-              />
+              <label>Select Approved Product *</label>
+              {approvedProducts.length > 0 ? (
+                <select
+                  className="search-input"
+                  value={createForm.product_id}
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    const matched = approvedProducts.find((p) => p.product_id === pid);
+                    setCreateForm({
+                      ...createForm,
+                      product_id: pid,
+                      unit_price: matched?.unit_cost ? String(matched.unit_cost) : createForm.unit_price,
+                    });
+                  }}
+                  required
+                >
+                  <option value="">-- Choose an Approved Product --</option>
+                  {approvedProducts.map((p) => (
+                    <option key={p.product_id} value={p.product_id}>
+                      {p.product_id} - {p.name} (${Number(p.unit_cost || 0).toFixed(2)})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="search-input"
+                  value={createForm.product_id}
+                  onChange={(e) => setCreateForm({ ...createForm, product_id: e.target.value })}
+                  placeholder="e.g. P00003 (Must be Approved)"
+                  required
+                />
+              )}
+              <small style={{ color: "var(--text)", fontSize: "11px", display: "block", marginTop: "3px" }}>
+                Only products approved by managers/admins can have offers created.
+              </small>
             </div>
             <div>
               <label>Quantity</label>

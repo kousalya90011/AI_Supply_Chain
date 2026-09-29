@@ -129,6 +129,11 @@ def get_supplier_authorized_products(
         for pid, sid in db_offers:
             if sid and (str(sid).strip().upper() == target_sid or normalize_supplier_id(sid) == norm_target):
                 authorized_products.add(str(pid).strip().upper())
+
+        db_products = active_db.query(Product.product_id, Product.supplier_id).all()
+        for pid, sid in db_products:
+            if sid and (str(sid).strip().upper() == target_sid or normalize_supplier_id(sid) == norm_target):
+                authorized_products.add(str(pid).strip().upper())
     except Exception:
         pass
     finally:

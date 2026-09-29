@@ -127,8 +127,21 @@ def create_offer(
 
     if not db.query(Supplier).filter(Supplier.supplier_id == supplier_id).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supplier not found")
-    if not db.query(Product).filter(Product.product_id == payload.product_id).first():
+    product = db.query(Product).filter(Product.product_id == payload.product_id).first()
+    if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if getattr(product, "approval_status", "APPROVED") != "APPROVED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Offer cannot be created for product '{product.product_id}'. The product is not approved (status: '{product.approval_status}'). Offers can only be created once the product is APPROVED by a Supply Chain Manager or Admin.",
+        )
+
+    if product.supplier_id and product.supplier_id != supplier_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Supplier access denied: You cannot create offers for another supplier's product.",
+        )
 
     try:
         offer = SupplierOffer(

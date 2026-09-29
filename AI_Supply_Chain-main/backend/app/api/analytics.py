@@ -34,27 +34,42 @@ def dashboard():
 
 @router.get("/supplier-risk")
 def supplier_risk(limit: int | None = None):
+    try:
+        df = service.supplier_risk()
+        if df is None:
+            return []
 
-    df = service.supplier_risk()
+        if hasattr(df, "replace") and hasattr(df, "to_dict"):
+            df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            if limit is not None and limit > 0:
+                return df.head(limit).to_dict(orient="records")
+            return df.to_dict(orient="records")
 
-    if limit is not None and limit > 0:
-        return df.head(limit).to_dict(
-            orient="records"
+        return df
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
         )
-
-    return df.to_dict(
-        orient="records"
-    )
 
 
 @router.get("/delivery-risk")
 def delivery_risk():
+    try:
+        df = service.delivery_risk()
+        if df is None:
+            return []
 
-    df = service.delivery_risk()
+        if hasattr(df, "replace") and hasattr(df, "to_dict"):
+            df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            return df.head(20).to_dict(orient="records")
 
-    return df.head(20).to_dict(
-        orient="records"
-    )
+        return df
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
 
 
     # @router.get("/inventory-risk")
@@ -109,9 +124,16 @@ def route_risk():
             result["datasets"]["orders_extended"]
         )
 
-        return df.head(20).to_dict(
-            orient="records"
-        )
+        if df is None:
+            return []
+
+        if hasattr(df, "replace") and hasattr(df, "to_dict"):
+            df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            return df.head(20).to_dict(
+                orient="records"
+            )
+
+        return df
 
     except Exception as exc:
 

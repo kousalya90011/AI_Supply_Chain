@@ -47,3 +47,9 @@ code {
   border-radius: 4px;
   color: #E5C45A;
 }
+
+input, select, textarea {
+  color-scheme: dark;
+  font-family: var(--sans);
+}
+

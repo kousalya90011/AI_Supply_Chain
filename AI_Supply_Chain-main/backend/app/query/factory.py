@@ -18,6 +18,7 @@ from app.analytics.lead_time_anomaly import LeadTimeAnomalyAnalyzer
 from app.analytics.supplier_disruption_impact import SupplierDisruptionImpactAnalyzer
 from app.analytics.major_risks import MajorRisksAnalyzer
 from app.analytics.forecasting import DemandForecaster
+from app.analytics.product_profile import ProductProfileAnalyzer
 
 from app.query.registry import AnalyticsRegistry
 from app.query.schema import QueryPlan
@@ -259,6 +260,23 @@ class AnalyticsAdapter:
                 allowed_sids = {str(s).strip().upper() for s in sids if s is not None}
             elif plan.filters.get("supplier_id"):
                 allowed_sids = {str(plan.filters.get("supplier_id")).strip().upper()}
+
+        # =====================================================
+        # PRODUCT PROFILE
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            ProductProfileAnalyzer,
+        ):
+            datasets = self._datasets()
+            products = datasets.get("products")
+            pid = plan.entity_id or (plan.entity_ids[0] if getattr(plan, "entity_ids", None) else None)
+            return self.analyzer.analyze(
+                products=products,
+                product_id=pid,
+                product_ids=plan.entity_ids or ([pid] if pid else None),
+            )
 
         # =====================================================
         # OFFERS
@@ -576,12 +594,12 @@ class AnalyticsAdapter:
             if cond == "not_high_risk":
                 res_df = res_df[~res_df["risk_level"].isin(["CRITICAL", "HIGH"])].sort_values(by="late_rate", ascending=True)
             elif cond == "low_risk" or getattr(plan, "negative_condition", False):
-                if plan.operation == "filter":
+                if plan.operation == "filter" and not plan.entity_id:
                     res_df = res_df[res_df["risk_level"].isin(["LOW", "MEDIUM"])].sort_values(by="late_rate", ascending=True)
                 elif plan.direction == "ascending":
                     res_df = res_df.sort_values(by="late_rate", ascending=True)
             elif cond == "high_risk":
-                if plan.operation == "filter":
+                if plan.operation == "filter" and not plan.entity_id:
                     res_df = res_df[res_df["risk_level"].isin(["CRITICAL", "HIGH"])].sort_values(by="late_rate", ascending=False)
             return res_df
 
@@ -1206,6 +1224,26 @@ def create_analytics_registry(
             analyzer=ProductCostAnalyzer(),
             data_service=data_service,
             dataset_name="product_attributes",
+            entity_column="product_id",
+        ),
+    )
+
+    registry.register(
+        "product_profile",
+        AnalyticsAdapter(
+            analyzer=ProductProfileAnalyzer(data_service),
+            data_service=data_service,
+            dataset_name="products",
+            entity_column="product_id",
+        ),
+    )
+
+    registry.register(
+        "product_details",
+        AnalyticsAdapter(
+            analyzer=ProductProfileAnalyzer(data_service),
+            data_service=data_service,
+            dataset_name="products",
             entity_column="product_id",
         ),
     )

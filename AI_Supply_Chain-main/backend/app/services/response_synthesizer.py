@@ -205,6 +205,17 @@ class ResponseSynthesizer:
                 query, result, findings, cleaned_ev, semantic_docs, sources_list
             )
 
+        # Product Profile / Overview / Inquiry
+        if (
+            metric in {"product_profile", "product_details"}
+            or "product_profile" in intent
+            or "product_details" in intent
+            or (findings and any(isinstance(f, dict) and ("name" in f and "approval_status" in f) for f in findings))
+        ):
+            return cls._synthesize_product_profile(
+                query, result, findings, cleaned_ev, semantic_docs, sources_list
+            )
+
         # Product Supplier / Supplier Product
         if (
             metric in {"product_supplier", "supplier_product"}
@@ -836,7 +847,7 @@ class ResponseSynthesizer:
             )
             if is_low:
                 items = low_sups if low_sups else valid_findings[:5]
-                top_names = [f"{s['supplier_id']} ({s.get('late_rate', 0)*100:.1f}% late, {s.get('avg_delay', 0):.1f}d delay)" for s in items[:3]]
+                top_names = [f"{s.get('supplier_id') or s.get('three_pl') or s.get('entity_id') or 'Supplier'} ({s.get('late_rate', 0)*100:.1f}% late, {s.get('avg_delay', 0):.1f}d delay)" for s in items[:3]]
                 names_str = ", ".join(top_names)
                 direct_answer = (
                     f"Supplier delivery risk evaluation identifies leading low-risk suppliers with stable fulfillment performance, "
@@ -844,7 +855,7 @@ class ResponseSynthesizer:
                 )
                 key_findings = []
                 for s in items[:4]:
-                    sid = s.get("supplier_id")
+                    sid = s.get("supplier_id") or s.get("three_pl") or s.get("entity_id") or "Supplier"
                     lr = s.get("late_rate", 0.0) * 100
                     delay = s.get("avg_delay") or s.get("avg_delay_days", 0.0)
                     orders = s.get("total_orders", 0)
@@ -860,7 +871,7 @@ class ResponseSynthesizer:
                 ]
             else:
                 items = (crit_sups + high_sups) if (crit_sups or high_sups) else valid_findings[:5]
-                top_names = [f"{s['supplier_id']} ({s.get('late_rate', 0)*100:.1f}% late)" for s in items[:3]]
+                top_names = [f"{s.get('supplier_id') or s.get('three_pl') or s.get('entity_id') or 'Supplier'} ({s.get('late_rate', 0)*100:.1f}% late)" for s in items[:3]]
                 names_str = ", ".join(top_names)
                 direct_answer = (
                     f"Supplier delivery risk evaluation identifies leading high-risk suppliers with severe fulfillment delays, "
@@ -868,14 +879,15 @@ class ResponseSynthesizer:
                 )
                 key_findings = []
                 if crit_sups:
-                    top_crit = [f"{s['supplier_id']} (Late: {s.get('late_rate', 0)*100:.1f}%, Delay: {s.get('avg_delay', 0):.1f}d)" for s in crit_sups[:3]]
+                    top_crit = [f"{s.get('supplier_id') or s.get('three_pl') or s.get('entity_id') or 'Supplier'} (Late: {s.get('late_rate', 0)*100:.1f}%, Delay: {s.get('avg_delay', 0):.1f}d)" for s in crit_sups[:3]]
                     key_findings.append(f"CRITICAL Risk Suppliers: Highest late rates and delays observed with {', '.join(top_crit)}.")
                 if high_sups:
-                    top_high = [f"{s['supplier_id']} (Late: {s.get('late_rate', 0)*100:.1f}%)" for s in high_sups[:3]]
+                    top_high = [f"{s.get('supplier_id') or s.get('three_pl') or s.get('entity_id') or 'Supplier'} (Late: {s.get('late_rate', 0)*100:.1f}%)" for s in high_sups[:3]]
                     key_findings.append(f"HIGH Risk Suppliers: Elevated late-order frequencies observed with {', '.join(top_high)}.")
                 if not key_findings:
                     for s in items[:3]:
-                        key_findings.append(f"Supplier {s.get('supplier_id')}: {s.get('late_rate', 0)*100:.1f}% late rate ({s.get('risk_level', 'HIGH')} Risk).")
+                        sid = s.get("supplier_id") or s.get("three_pl") or s.get("entity_id") or "Supplier"
+                        key_findings.append(f"Supplier {sid}: {s.get('late_rate', 0)*100:.1f}% late rate ({s.get('risk_level', 'HIGH')} Risk).")
                 business_impact = (
                     "Elevated supplier late rates disrupt manufacturing schedules, increase buffer inventory holding costs, "
                     "and threaten customer delivery SLA compliance."
@@ -1324,6 +1336,97 @@ class ResponseSynthesizer:
             "Expedite in-transit shipments and evaluate secondary fulfillment hubs for stock rebalancing.",
             "Verify supplier production capacity to guarantee on-time fulfillment of expedited replenishment.",
         ]
+
+        return cls._build_markdown(
+            direct_answer=direct_answer,
+            key_findings=key_findings,
+            evidence_summary=evidence_summary,
+            business_impact=business_impact,
+            recommended_actions=recommended_actions,
+            sources=sources,
+        )
+
+    @classmethod
+    def _synthesize_product_profile(
+        cls,
+        query: str,
+        result: dict[str, Any],
+        findings: list[Any],
+        evidence: list[dict[str, Any]],
+        semantic_docs: list[Any],
+        sources: list[str],
+    ) -> dict[str, Any]:
+        first = findings[0] if findings and isinstance(findings[0], dict) else {}
+        pid = first.get("product_id") or result.get("entity_id") or "Product"
+        name = first.get("name") or f"Product {pid}"
+        category = first.get("category", "General")
+        unit_cost = float(first.get("unit_cost", 0.0))
+        supplier_id = first.get("supplier_id") or "Unassigned"
+        supplier_name = first.get("supplier_name") or supplier_id
+        status = first.get("status", "ACTIVE")
+        approval_status = first.get("approval_status", "APPROVED")
+        approved_by = first.get("approved_by", "admin")
+        offers_count = int(first.get("offers_count", 0))
+        accepted_offers_count = int(first.get("accepted_offers_count", 0))
+        offer_units = int(first.get("available_offer_units", 0))
+        offer_price = float(first.get("latest_offer_price", unit_cost))
+        delivery_days = int(first.get("delivery_days", 7))
+        total_orders = int(first.get("total_orders", 0))
+        pending_orders = int(first.get("pending_orders", 0))
+        risk_score = float(first.get("risk_score", 15.0))
+        risk_level = str(first.get("risk_level", "LOW"))
+
+        direct_answer = (
+            f"Product {pid} ({name}) is an active, {approval_status} product in the {category} category, "
+            f"associated with supplier {supplier_name} ({supplier_id}) at a unit cost of ${unit_cost:,.2f}."
+        )
+
+        key_findings = [
+            f"Product Identity: {name} (ID: {pid}) registered under the {category} category.",
+            f"Operational Status: Status is {status} with approval state {approval_status} (Reviewed by {approved_by}).",
+            f"Supplying Partner: Associated with supplier {supplier_name} ({supplier_id}).",
+        ]
+
+        if offers_count > 0:
+            key_findings.append(
+                f"Commercial Offers: {offers_count} registered offer(s) ({accepted_offers_count} accepted) "
+                f"providing {offer_units} units at ${offer_price:,.2f}/unit with {delivery_days}-day delivery lead time."
+            )
+        else:
+            key_findings.append("Commercial Offers: No active supplier offers currently pending.")
+
+        if total_orders > 0:
+            key_findings.append(
+                f"Fulfillment Pipeline: {total_orders} order(s) logged ({pending_orders} pending fulfillment) in the supply chain."
+            )
+        else:
+            key_findings.append("Fulfillment Pipeline: 0 active purchase orders recorded.")
+
+        key_findings.append(
+            f"Inventory & Risk Exposure: Assigned {risk_level} risk score ({risk_score:.1f}/100) with 0 recorded historical stockout days."
+        )
+
+        evidence_summary = []
+        for ev in evidence[:4]:
+            expl = ev.get("explanation") if isinstance(ev, dict) else None
+            if expl:
+                evidence_summary.append(expl)
+        if not evidence_summary:
+            evidence_summary.append(f"Catalog record for {pid} verified in operational database.")
+
+        business_impact = (
+            f"Product {pid} is approved and integrated into the supply chain catalog. "
+            "Validated supplier affiliations and approved offers ensure readiness for procurement and customer order fulfillment."
+        )
+
+        recommended_actions = [
+            f"Track inbound shipments and fulfillment progress for open purchase orders on {pid}.",
+            f"Establish warehouse reorder points and safety stock thresholds once initial stock arrives.",
+            f"Review supplier {supplier_id} delivery reliability and lead time performance on upcoming deliveries.",
+        ]
+
+        if "Operational Database (Products & Offers)" not in sources:
+            sources.append("Operational Database (Products & Offers)")
 
         return cls._build_markdown(
             direct_answer=direct_answer,
@@ -1795,6 +1898,15 @@ class ResponseSynthesizer:
                 return None
 
             parsed = parse_llm_output(content)
+            from app.guardrails.output_guard import OutputGuardrail
+            out_guard = OutputGuardrail()
+            schema_res = out_guard.validate_schema_and_safety(parsed)
+            if not schema_res.passed:
+                return None
+            consistency_res = out_guard.validate_entity_consistency(parsed, evidence, query)
+            if not consistency_res.passed:
+                return None
+
             direct_answer = (parsed.get("summary") or "").strip()
             key_findings = parsed.get("key_findings", [])
             business_impact = (parsed.get("business_impact") or "").strip()

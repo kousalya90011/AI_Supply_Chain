@@ -12,3 +12,8 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+
+# Vector Store and Knowledge Artifacts
+*.joblib
+**/vector_store.joblib
+.pytest_cache/

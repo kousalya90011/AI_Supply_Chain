@@ -352,16 +352,37 @@ class InventoryRiskAnalyzer:
         # Sort highest risk first
         # ---------------------------------------------------------
 
-        grouped = grouped.sort_values(
-            "risk_score",
-            ascending=False
-        ).reset_index(drop=True)
-
         # ---------------------------------------------------------
-        # Optional top-N
-        #
-        # None = return every available product
+        # Include catalog products lacking daily inventory telemetry
         # ---------------------------------------------------------
+        all_prods = datasets.get("products")
+        if all_prods is not None and not all_prods.empty and "product_id" in all_prods.columns:
+            known = set(grouped["product_id"].astype(str).str.upper())
+            missing = all_prods[~all_prods["product_id"].astype(str).str.upper().isin(known)]
+            if not missing.empty:
+                extra_rows = []
+                for _, mrow in missing.iterrows():
+                    extra_rows.append({
+                        "product_id": str(mrow["product_id"]).strip().upper(),
+                        "min_inventory": 0,
+                        "avg_inventory": 0.0,
+                        "total_days": 0,
+                        "zero_inventory_days": 0,
+                        "stockout_days": 0,
+                        "stockout_rate": 0.0,
+                        "average_daily_demand": 0.0,
+                        "total_demand": 0.0,
+                        "days_of_cover": 999.0,
+                        "demand_pressure": 0.0,
+                        "stockout_score": 0.0,
+                        "demand_pressure_score": 0.0,
+                        "coverage_score": 0.0,
+                        "risk_score": 15.0,
+                        "risk_level": "LOW",
+                        "risk_reason": "Newly cataloged product in approved status awaiting initial warehouse stock.",
+                    })
+                if extra_rows:
+                    grouped = pd.concat([grouped, pd.DataFrame(extra_rows)], ignore_index=True)
 
         if top_n is not None:
             grouped = grouped.head(top_n)

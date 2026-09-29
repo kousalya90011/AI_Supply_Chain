@@ -164,6 +164,11 @@ class Product(Base):
     category = Column(String(100), nullable=False)
     unit_cost = Column(Float, nullable=False)
     status = Column(String(30), nullable=False, default="ACTIVE")
+    supplier_id = Column(String(100), nullable=True, index=True)
+    approval_status = Column(String(30), nullable=False, default="APPROVED")
+    approved_by = Column(String(120), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

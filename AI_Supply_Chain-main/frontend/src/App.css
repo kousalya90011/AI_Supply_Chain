@@ -1595,19 +1595,131 @@ select.search-input:focus {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
   align-items: end;
 }
 
+.form-field,
+.form-grid > div {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.form-field label,
 .form-grid label {
   font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
   display: block;
   margin-bottom: 6px;
+}
+
+/* =========================================================
+   UNIVERSAL FORM INPUTS, SEARCH INPUTS & SELECTS
+========================================================= */
+
+.search-input,
+.form-input,
+.form-select,
+.form-textarea,
+.form-field input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+.form-field select,
+.form-field textarea,
+.form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+.form-grid select,
+.form-grid textarea {
+  display: block;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  padding: 8px 14px;
+  background-color: #141414;
+  color: #F5F5F5;
+  border: 1px solid #2C2C2C;
+  border-radius: var(--radius-md, 8px);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  box-sizing: border-box;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  outline: none;
+}
+
+.search-input:hover,
+.form-field input:hover,
+.form-field select:hover,
+.form-grid input:hover,
+.form-grid select:hover {
+  border-color: #3F3F3F;
+  background-color: #181818;
+}
+
+.search-input:focus,
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus,
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus {
+  border-color: #D4AF37;
+  background-color: #181818;
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.25);
+}
+
+.search-input::placeholder,
+.form-field input::placeholder,
+.form-grid input::placeholder,
+.form-grid textarea::placeholder {
+  color: #6B7280;
+  font-size: 13px;
+}
+
+.search-input:disabled,
+.search-input[readonly],
+.form-field input:disabled,
+.form-field input[readonly],
+.form-grid input:disabled,
+.form-grid input[readonly] {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: #242424;
+  color: #D4AF37;
+  cursor: not-allowed;
+}
+
+/* Custom styled dropdown arrow for all selects */
+select.search-input,
+.form-field select,
+.form-grid select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23D4AF37' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+select.search-input option,
+.form-field select option,
+.form-grid select option {
+  background-color: #161616;
+  color: #F5F5F5;
+  padding: 10px;
+}
+
+textarea.search-input,
+.form-field textarea,
+.form-grid textarea {
+  height: auto;
+  min-height: 80px;
+  resize: vertical;
 }
 
 .table-action-button {

@@ -59,6 +59,22 @@ def parse_llm_output(
         )
 
     # -------------------------------------------------
+    # Safety scan: reject executable or injection code
+    # -------------------------------------------------
+    dangerous_patterns = [
+        "<script",
+        "javascript:",
+        "drop table",
+        "delete from",
+        "eval(",
+        "os.system(",
+    ]
+    lower_text = text.lower()
+    for dp in dangerous_patterns:
+        if dp in lower_text:
+            raise ValueError(f"LLM output contains forbidden unsafe pattern: {dp}")
+
+    # -------------------------------------------------
     # Validate expected fields
     # -------------------------------------------------
 
@@ -89,6 +105,12 @@ def parse_llm_output(
     if not isinstance(business_impact, str):
         business_impact = str(business_impact) if business_impact else ""
 
+    # Bound field lengths
+    summary = summary[:2000].strip()
+    business_impact = business_impact[:1500].strip()
+    clean_findings = [str(item)[:500].strip() for item in key_findings[:10] if str(item).strip()]
+    clean_actions = [str(item)[:500].strip() for item in recommended_actions[:6] if str(item).strip()]
+
     try:
         confidence = float(confidence)
     except (TypeError, ValueError):
@@ -101,14 +123,8 @@ def parse_llm_output(
 
     return {
         "summary": summary,
-        "key_findings": [
-            str(item)
-            for item in key_findings
-        ],
+        "key_findings": clean_findings,
         "business_impact": business_impact,
-        "recommended_actions": [
-            str(item)
-            for item in recommended_actions
-        ],
+        "recommended_actions": clean_actions,
         "confidence": confidence
     }

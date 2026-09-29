@@ -132,6 +132,12 @@ class QueryService(HybridRAGService):
 
         self.audit_service = AuditService()
 
+        # -----------------------------------------------------
+        # Guardrail Service (Layers A-K)
+        # -----------------------------------------------------
+        from app.guardrails import GuardrailService
+        self.guardrail_service = GuardrailService()
+
     # =========================================================
     # MAIN QUERY
     # =========================================================
@@ -146,19 +152,68 @@ class QueryService(HybridRAGService):
         start_time = time.perf_counter()
 
         # -----------------------------------------------------
-        # Empty query
+        # 0. INPUT GUARDRAIL (Layer A)
         # -----------------------------------------------------
-
-        if not query or not query.strip():
-
-            return self._fallback_response(
-                query=query,
+        input_res = self.guardrail_service.check_input(query)
+        if not input_res.passed:
+            fallback = self._fallback_response(
+                query=query or "",
                 start_time=start_time,
-                reason="empty_query",
+                reason=input_res.reason or "input_guardrail_rejected",
                 user_scope=user_scope,
+                custom_message=input_res.user_message,
             )
+            fallback["guardrail_triggered"] = True
+            fallback["guardrail_reason"] = input_res.reason
+            self._record_audit(
+                query=query or "",
+                plan=None,
+                user_scope=user_scope,
+                response=fallback,
+                db=db,
+            )
+            self._record_evaluation(
+                query=query or "",
+                plan=None,
+                user_scope=user_scope,
+                response=fallback,
+                start_time=start_time,
+                db=db,
+            )
+            return fallback
 
-        cleaned_query = query.strip()
+        cleaned_query = input_res.sanitized_query or (query or "").strip()
+
+        # -----------------------------------------------------
+        # 0.1 QUERY SCOPE GUARDRAIL (Layer B)
+        # -----------------------------------------------------
+        scope_res = self.guardrail_service.check_scope(cleaned_query)
+        if not scope_res.passed:
+            fallback = self._fallback_response(
+                query=cleaned_query,
+                start_time=start_time,
+                reason=scope_res.reason or "out_of_domain",
+                user_scope=user_scope,
+                custom_message=scope_res.user_message,
+            )
+            fallback["guardrail_triggered"] = True
+            fallback["guardrail_reason"] = scope_res.reason
+            self._record_audit(
+                query=cleaned_query,
+                plan=None,
+                user_scope=user_scope,
+                response=fallback,
+                db=db,
+            )
+            self._record_evaluation(
+                query=cleaned_query,
+                plan=None,
+                user_scope=user_scope,
+                response=fallback,
+                start_time=start_time,
+                db=db,
+            )
+            return fallback
 
         try:
 
@@ -269,7 +324,13 @@ class QueryService(HybridRAGService):
                 or plan.metric in {"summary", "risk_profile"}
                 or any(k in cleaned_query.lower() for k in ["summarize", "overview", "what should i know", "tell me about", "profile", "relationship", "why is", "risk profile"])
             )
-            is_hybrid_query = len(result.get("requirement_results", [])) > 2 or plan.requires_reasoning
+            is_hybrid_query = (
+                len(result.get("requirement_results", [])) > 2
+                or plan.requires_reasoning
+                or (len(result.get("requirements", [])) > 1)
+                or ("products do they supply" in cleaned_query.lower())
+                or ("what products" in cleaned_query.lower() and "demand" in cleaned_query.lower())
+            )
 
             # Ensure structured evidence is present from findings if executor didn't format it
             structured_evidence = result.get("evidence", [])
@@ -300,11 +361,12 @@ class QueryService(HybridRAGService):
                         target_entity_id = first_f.get("supplier_id") or first_f.get("product_id")
 
                 try:
+                    bounded_top_k = self.guardrail_service.rag_guard.bound_top_k(2 if is_semantic_intent else 1)
                     retrieval_res = self.semantic_retriever.retrieve(
                         query=cleaned_query,
-                        top_k=2 if is_semantic_intent else 1,
+                        top_k=bounded_top_k,
                         user_scope=user_scope,
-                        target_entity_id=target_entity_id,
+                        target_entity_id=plan.entity_id,
                     )
                     if hasattr(retrieval_res, "documents"):
                         semantic_docs = retrieval_res.documents
@@ -320,9 +382,9 @@ class QueryService(HybridRAGService):
                 sid = user_scope.supplier_id
                 semantic_evidence = [
                     ev for ev in semantic_evidence
-                    if (ev.get("entity_type") == "supplier" and ev.get("entity_id") == sid)
-                    or (ev.get("entity_type") == "product" and sid in ev.get("data", {}).get("metadata", {}).get("supplier_ids", []))
-                    or (ev.get("data", {}).get("supplier_id") == sid)
+                    if (ev.get("entity_type") == "supplier" and supplier_ids_match(ev.get("entity_id"), sid))
+                    or (ev.get("entity_type") == "product" and any(supplier_ids_match(sid, s) for s in ev.get("data", {}).get("metadata", {}).get("supplier_ids", [])))
+                    or supplier_ids_match(ev.get("data", {}).get("supplier_id"), sid)
                 ]
 
             # Merge evidence
@@ -341,6 +403,8 @@ class QueryService(HybridRAGService):
                         ev["confidence"] = 1.0
 
             combined_evidence = list(structured_evidence) + semantic_evidence
+            # RAG Guardrail: bound total evidence passed to synthesizer
+            combined_evidence = self.guardrail_service.rag_guard.bound_evidence(combined_evidence)
 
             if user_scope and getattr(user_scope, "is_supplier", False) and user_scope.supplier_id:
                 user_sid = user_scope.supplier_id
@@ -520,6 +584,8 @@ class QueryService(HybridRAGService):
                 "llm_used": bool(response.get("llm_used", False)),
                 "retrieval_mode": response.get("retrieval_mode", "structured"),
                 "sources": response.get("sources", []),
+                "guardrail_triggered": bool(response.get("guardrail_triggered", False)),
+                "guardrail_reason": response.get("guardrail_reason"),
             }
 
             self.audit_service.record(
@@ -571,6 +637,9 @@ class QueryService(HybridRAGService):
                 "agents_used": response.get("agents_used", []),
                 "entity_type": response.get("entity_type"),
                 "entity_id": response.get("entity_id"),
+                "guardrail_triggered": bool(response.get("guardrail_triggered", False)),
+                "guardrail_reason": response.get("guardrail_reason"),
+                "evidence_sufficient": bool(response.get("evidence_sufficient", True)),
             }
 
             eval_record = EvaluationResult(
@@ -773,8 +842,16 @@ class QueryService(HybridRAGService):
             )
 
         # =====================================================
-        # RESPONSE
+        # RESPONSE (Guarded & Calibrated)
         # =====================================================
+
+        calibrated = self.guardrail_service.calibrate_confidence(
+            evidence=cleaned_evidence,
+            llm_confidence=result.get("confidence") or 0.85,
+            planner_confidence=planner_confidence,
+            retrieval_mode=retrieval_mode,
+            fallback_used=fallback_used,
+        )
 
         return {
             "status": (
@@ -796,8 +873,12 @@ class QueryService(HybridRAGService):
 
             "fallback_used": fallback_used,
             "llm_used": llm_used,
+            "guardrail_triggered": False,
+            "guardrail_reason": None,
+            "evidence_sufficient": len(cleaned_evidence) > 0,
 
-            "confidence": planner_confidence,
+            "confidence": calibrated["calibrated_confidence"],
+            "confidence_breakdown": calibrated["confidence_breakdown"],
 
             "answer": answer,
             "direct_answer": synthesis.get("direct_answer", ""),
@@ -2059,6 +2140,8 @@ class QueryService(HybridRAGService):
         start_time: float,
         reason: str,
         user_scope: QueryScope | None = None,
+        custom_message: str | None = None,
+        status: str | None = None,
     ) -> dict[str, Any]:
 
         synth = ResponseSynthesizer.synthesize(
@@ -2072,8 +2155,16 @@ class QueryService(HybridRAGService):
             sources=["Deterministic Fallback Engine"],
         )
 
+        full_answer = (
+            f"### Executive Summary\n{custom_message}\n\n### Operational Guidance\nPlease provide a query focused on supplier risk, delivery delays, inventory runways, or demand forecasting."
+            if custom_message
+            else synth["full_markdown_answer"]
+        )
+        direct_ans = custom_message or synth.get("direct_answer", "")
+        resp_status = status or ("fallback" if reason == "empty_query" else "clarification")
+
         return {
-            "status": "fallback",
+            "status": resp_status,
 
             "authorized_scope": (
                 f"supplier:{user_scope.supplier_id}"
@@ -2082,12 +2173,14 @@ class QueryService(HybridRAGService):
             ),
 
             "fallback_used": True,
+            "guardrail_triggered": bool(custom_message or reason not in {"empty_query"}),
+            "guardrail_reason": reason,
 
             "confidence": 0.0,
 
-            "answer": synth["full_markdown_answer"],
-            "direct_answer": synth.get("direct_answer", ""),
-            "executive_summary": synth.get("direct_answer", ""),
+            "answer": full_answer,
+            "direct_answer": direct_ans,
+            "executive_summary": direct_ans,
             "key_findings": synth["key_findings"],
             "evidence_summary": synth["evidence_summary"],
             "business_impact": synth["business_impact"],

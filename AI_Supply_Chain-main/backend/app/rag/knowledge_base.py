@@ -88,20 +88,20 @@ class LocalVectorStore:
 
         try:
             payload = joblib.load(target_path)
-            raw_docs = payload.get("documents", [])
+            raw_docs = payload.get("documents") or payload.get("chunks") or []
             self.documents = [
                 KnowledgeDocument(
-                    doc_id=d["doc_id"],
-                    doc_type=d["doc_type"],
-                    entity_id=d["entity_id"],
-                    title=d["title"],
-                    content=d["content"],
+                    doc_id=d.get("doc_id") or d.get("chunk_id", ""),
+                    doc_type=d.get("doc_type") or d.get("entity_type", "knowledge"),
+                    entity_id=d.get("entity_id", ""),
+                    title=d.get("title", ""),
+                    content=d.get("content", ""),
                     metadata=d.get("metadata", {}),
                 )
                 for d in raw_docs
             ]
             self.vectorizer = payload.get("vectorizer", self.vectorizer)
-            self.doc_matrix = payload.get("doc_matrix")
+            self.doc_matrix = payload.get("doc_matrix") if payload.get("doc_matrix") is not None else payload.get("chunk_matrix")
             self.is_indexed = payload.get("is_indexed", bool(self.documents))
             logger.info(f"Loaded vector store with {len(self.documents)} documents from {target_path}")
             return True

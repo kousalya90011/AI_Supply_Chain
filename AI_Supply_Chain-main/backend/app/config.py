@@ -41,6 +41,27 @@ class Settings(BaseSettings):
     HIGH_CONFIDENCE_THRESHOLD: float = 0.80
     LOW_CONFIDENCE_THRESHOLD: float = 0.50
 
+    # Guardrails Configuration
+    MAX_QUERY_LENGTH: int = 500
+    MAX_TOP_K: int = 5
+    MAX_EVIDENCE_ITEMS: int = 15
+    MIN_RETRIEVAL_SCORE: float = 0.05
+    ENABLE_INPUT_GUARDRAILS: bool = True
+    ENABLE_SCOPE_GUARDRAIL: bool = True
+    ENABLE_RAG_GUARDRAILS: bool = True
+    ENABLE_OUTPUT_GUARDRAILS: bool = True
+    ENABLE_GROUNDING_GUARDRAIL: bool = True
+
+    # Retrieval & Embeddings Configuration
+    EMBEDDING_PROVIDER: str = "local"
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    VECTOR_STORE: str = "local"
+    SEMANTIC_TOP_K: int = 5
+    STRUCTURED_TOP_K: int = 5
+    HYBRID_ALPHA: float = 0.5
+    HYBRID_BETA: float = 0.5
+    VECTOR_STORE_DIR: str = "../../data/knowledge_base"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

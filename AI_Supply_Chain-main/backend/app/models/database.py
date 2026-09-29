@@ -54,6 +54,20 @@ def initialize_database():
             Base.metadata.tables["suppliers"].create(bind=engine)
         if "products" not in table_names:
             Base.metadata.tables["products"].create(bind=engine)
+        else:
+            prod_columns = {col["name"] for col in inspector.get_columns("products")}
+            with engine.begin() as connection:
+                if "supplier_id" not in prod_columns:
+                    connection.execute(text("ALTER TABLE products ADD COLUMN supplier_id VARCHAR(100)"))
+                if "approval_status" not in prod_columns:
+                    connection.execute(text("ALTER TABLE products ADD COLUMN approval_status VARCHAR(30) DEFAULT 'APPROVED'"))
+                    connection.execute(text("UPDATE products SET approval_status = 'APPROVED' WHERE approval_status IS NULL"))
+                if "approved_by" not in prod_columns:
+                    connection.execute(text("ALTER TABLE products ADD COLUMN approved_by VARCHAR(120)"))
+                if "approved_at" not in prod_columns:
+                    connection.execute(text("ALTER TABLE products ADD COLUMN approved_at DATETIME"))
+                if "rejection_reason" not in prod_columns:
+                    connection.execute(text("ALTER TABLE products ADD COLUMN rejection_reason TEXT"))
         if "orders" not in table_names:
             Base.metadata.tables["orders"].create(bind=engine)
         if "inventory" not in table_names:

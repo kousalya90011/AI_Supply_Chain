@@ -105,16 +105,33 @@ function OrdersPage({ auth, mode }) {
           </div>
 
           <form onSubmit={handleCreate} className="form-grid">
-            <input className="search-input" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} placeholder="Product ID" required />
-            <input className="search-input" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} placeholder="Supplier ID" required />
-            <input className="search-input" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="Quantity" required />
-            <input className="search-input" type="number" step="0.01" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} placeholder="Unit Price" required />
-            <select className="search-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              <option value="PENDING">PENDING</option>
-              <option value="IN_TRANSIT">IN_TRANSIT</option>
-              <option value="DELIVERED">DELIVERED</option>
-            </select>
-            <button type="submit" className="primary-button" style={{ height: "42px" }}>Create Order</button>
+            <div className="form-field">
+              <label>Product ID *</label>
+              <input className="search-input" value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} placeholder="e.g. P00001" required />
+            </div>
+            <div className="form-field">
+              <label>Supplier ID *</label>
+              <input className="search-input" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} placeholder="e.g. S001" required />
+            </div>
+            <div className="form-field">
+              <label>Quantity *</label>
+              <input className="search-input" type="number" min="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="e.g. 100" required />
+            </div>
+            <div className="form-field">
+              <label>Unit Price ($) *</label>
+              <input className="search-input" type="number" step="0.01" min="0" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} placeholder="e.g. 50.00" required />
+            </div>
+            <div className="form-field">
+              <label>Status</label>
+              <select className="search-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                <option value="PENDING">PENDING</option>
+                <option value="IN_TRANSIT">IN_TRANSIT</option>
+                <option value="DELIVERED">DELIVERED</option>
+              </select>
+            </div>
+            <div className="form-field" style={{ justifyContent: "flex-end" }}>
+              <button type="submit" className="primary-button" style={{ height: "42px", width: "100%" }}>Create Order</button>
+            </div>
           </form>
         </section>
       )}

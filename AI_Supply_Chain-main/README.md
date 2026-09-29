@@ -91,7 +91,7 @@ A production-grade, full-stack intelligence and decision-support platform design
 | **ADMIN** | Full global access (All suppliers, products, routes, 3PLs) | Full access; approve/reject offers; edit orders | Global query access across all domains | View & trigger evaluations; inspect audit trail |
 | **SUPPLY_CHAIN_MANAGER** | Full global access (All suppliers, products, routes, 3PLs) | Full access; approve/reject offers; manage orders | Global query access across all domains | View dashboard KPIs; no user administration |
 | **SUPPLIER** | Scoped strictly to assigned `supplier_id` (e.g. `S0001`) | Manage own offers; view own purchase orders | Strictly scoped to own products, orders, and metrics | No access (isolated) |
-
+  
 ---
 
 ## 4. API Endpoints Reference
