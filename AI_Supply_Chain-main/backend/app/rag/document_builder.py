@@ -9,6 +9,7 @@ from app.analytics.inventory_risk import InventoryRiskAnalyzer
 from app.analytics.product_sales import ProductSalesAnalyzer
 from app.analytics.product_supplier import ProductSupplierAnalyzer
 from app.analytics.supplier_risk import SupplierRiskAnalyzer
+from app.analytics.lead_time_anomaly import LeadTimeAnomalyAnalyzer
 from app.models.database import SessionLocal
 from app.models.entities import Order as DBOrder, SupplierOffer as DBSupplierOffer
 from app.rag.schemas import KnowledgeDocument
@@ -113,6 +114,22 @@ class KnowledgeDocumentBuilder:
             logger.warning(f"Error mapping product suppliers: {e}")
             suppliers_by_product = {}
 
+        sup_analyzer = SupplierRiskAnalyzer()
+        try:
+            orders_ext = datasets.get("orders_extended")
+            if orders_ext is not None and not orders_ext.empty:
+                sup_risk_df = sup_analyzer.analyze(orders=orders_ext)
+                sup_risk_by_id = (
+                    sup_risk_df.set_index("supplier_id").to_dict(orient="index")
+                    if not sup_risk_df.empty and "supplier_id" in sup_risk_df.columns
+                    else {}
+                )
+            else:
+                sup_risk_by_id = {}
+        except Exception as e:
+            logger.warning(f"Error computing supplier risk for product docs: {e}")
+            sup_risk_by_id = {}
+
         documents: list[KnowledgeDocument] = []
         for _, prod_row in products_df.iterrows():
             pid = str(prod_row["product_id"]).upper()
@@ -159,54 +176,32 @@ class KnowledgeDocumentBuilder:
                 "source": "product_analytics",
             }
 
-            # Chunk 1: Product Profile
-            documents.append(KnowledgeDocument(
-                doc_id=f"product:{pid}:profile",
-                doc_type="product",
-                entity_id=pid,
-                title=f"Product {pid} Profile ({category})",
-                content=f"Product {pid} belongs to the {category} category with a standard unit cost of ${unit_cost:.2f}.",
-                metadata={**base_meta, "topic": "product_profile"},
-            ))
+            sup_perf_notes = []
+            for s in sups:
+                sid_k = s["supplier_id"]
+                s_perf = sup_risk_by_id.get(sid_k, {})
+                s_lvl = s_perf.get("risk_level", "LOW")
+                s_disp = float(s_perf.get("disruption_rate", 0.0)) * 100
+                s_late = float(s_perf.get("late_rate", 0.0)) * 100
+                sup_perf_notes.append(f"{s['supplier_name']} ({sid_k}: {s_lvl} Risk, {s_disp:.1f}% disruption rate, {s_late:.1f}% late rate)")
+            sup_context = "; ".join(sup_perf_notes) if sup_perf_notes else sup_desc
 
-            # Chunk 2: Supplier Relationship
+            # Comprehensive Product Document (Operational Risk Profile)
+            content_lines = [
+                f"Product {pid} Operational Risk Profile ({category}):",
+                f"- Category & Unit Cost: Product belongs to {category} category with a standard unit cost of ${unit_cost:.2f}.",
+                f"- Supplier Relationships: Sourced from {sup_context}.",
+                f"- Inventory Status: Maintains an average inventory of {avg_inv:,.1f} units, providing an estimated {days_of_cover:.1f} days of inventory cover.",
+                f"- Stockout Exposure: Recorded {zero_inv_days} zero-inventory stockout days, yielding a stockout frequency of {stockout_rate * 100:.2f}%. Assigned risk level is {risk_level} ({risk_score:.1f}/100) due to {risk_reason}.",
+                f"- Demand & Sales: Average daily demand of {avg_daily_demand:.1f} units with total recorded demand of {total_demand:,.0f} units and cumulative sales of ${total_sales:,.2f}.",
+            ]
             documents.append(KnowledgeDocument(
-                doc_id=f"product:{pid}:suppliers",
+                doc_id=f"product:{pid}",
                 doc_type="product",
                 entity_id=pid,
-                title=f"Product {pid} Supplier Relationships",
-                content=f"Product {pid} is supplied by: {sup_desc}.",
-                metadata={**base_meta, "topic": "supplier_relationship"},
-            ))
-
-            # Chunk 3: Demand Metrics
-            documents.append(KnowledgeDocument(
-                doc_id=f"product:{pid}:demand",
-                doc_type="product",
-                entity_id=pid,
-                title=f"Product {pid} Demand Profile",
-                content=f"Product {pid} records average daily demand of {avg_daily_demand:.1f} units with total recorded demand of {total_demand:,.0f} units and cumulative sales of ${total_sales:,.2f}.",
-                metadata={**base_meta, "topic": "demand_metrics"},
-            ))
-
-            # Chunk 4: Inventory Status
-            documents.append(KnowledgeDocument(
-                doc_id=f"product:{pid}:inventory",
-                doc_type="product",
-                entity_id=pid,
-                title=f"Product {pid} Inventory Status",
-                content=f"Product {pid} maintains an average inventory of {avg_inv:,.1f} units, providing an estimated {days_of_cover:.1f} days of inventory cover.",
-                metadata={**base_meta, "topic": "inventory_status"},
-            ))
-
-            # Chunk 5: Stockout Exposure
-            documents.append(KnowledgeDocument(
-                doc_id=f"product:{pid}:stockout",
-                doc_type="product",
-                entity_id=pid,
-                title=f"Product {pid} Stockout Exposure & Risk",
-                content=f"Product {pid} has recorded {zero_inv_days} zero-inventory stockout days, yielding a stockout frequency of {stockout_rate * 100:.2f}%. Assigned risk level is {risk_level} ({risk_score:.1f}/100) due to {risk_reason}.",
-                metadata={**base_meta, "topic": "stockout_exposure"},
+                title=f"Product {pid} ({category}) Operational Risk Profile",
+                content="\n".join(content_lines),
+                metadata=base_meta,
             ))
 
         return documents
@@ -241,6 +236,17 @@ class KnowledgeDocumentBuilder:
         except Exception as e:
             logger.warning(f"Error computing supplier risk: {e}")
             sup_risk_by_id = {}
+
+        lt_analyzer = LeadTimeAnomalyAnalyzer()
+        try:
+            if orders_extended is not None and not orders_extended.empty:
+                lt_res = lt_analyzer.analyze(orders=orders_extended)
+                anom_map = {str(row["supplier_id"]).upper(): row for row in lt_res.get("findings", []) if "supplier_id" in row}
+            else:
+                anom_map = {}
+        except Exception as e:
+            logger.warning(f"Error computing lead time anomalies for supplier docs: {e}")
+            anom_map = {}
 
         prod_sup_analyzer = ProductSupplierAnalyzer()
         try:
@@ -280,6 +286,11 @@ class KnowledgeDocumentBuilder:
             risk_level = str(perf.get("risk_level", "LOW"))
             risk_reason = str(perf.get("risk_reason", f"Late rate: {late_rate * 100:.1f}%"))
 
+            anom_data = anom_map.get(sid, {})
+            lt_chg_val = anom_data.get("absolute_change_days")
+            lt_chg_txt = f", recent lead time change: {lt_chg_val:+.1f}d" if lt_chg_val is not None else ""
+            chg_str = f" Recent 90-day lead-time change: {lt_chg_val:+.1f} days ({anom_data.get('percentage_change', 0):+.1f}%), status: {anom_data.get('status', 'Normal')}." if lt_chg_val is not None else ""
+
             base_meta = {
                 "document_type": "supplier",
                 "entity_id": sid,
@@ -301,54 +312,23 @@ class KnowledgeDocumentBuilder:
                 "source": "supplier_analytics",
             }
 
-            # Chunk 1: Supplier Identity and Profile
-            documents.append(KnowledgeDocument(
-                doc_id=f"supplier:{sid}:profile",
-                doc_type="supplier",
-                entity_id=sid,
-                title=f"Supplier {sid} ({sname}) Profile",
-                content=f"Supplier {sid} ({sname}) operates in region {region} as a Tier {tier} partner. It is responsible for supplying {prod_desc}.",
-                metadata={**base_meta, "topic": "identity_profile"},
-            ))
+            content_lines = [
+                f"Supplier {sid} ({sname}) Performance & Relationship Profile:",
+                f"- Region & Classification: Operating in {region} as a Tier {tier} supplier.",
+                f"- Products Supplied: Supplies {prod_desc}.",
+                f"- Delivery Reliability: {total_orders:,} total orders executed with {total_units:,} units delivered. {late_orders:,} late orders resulting in a late delivery rate of {late_rate * 100:.2f}% (average delay: {avg_delay:.1f} days).",
+                f"- Lead-Time Behavior: Average fulfillment lead time {avg_lead:.1f} days (std: {std_lead:.1f}d){lt_chg_txt}.{chg_str}",
+                f"- Disruption History: Recorded disruption rate of {disr_rate * 100:.1f}% across historical orders, impacting fulfillment continuity for supplied products ({prod_desc}).",
+                f"- Supplier Risk Assessment: Score {risk_score:.1f}/100 categorized as {risk_level} Risk. Details: {risk_reason}.",
+            ]
 
-            # Chunk 2: Delivery Performance
             documents.append(KnowledgeDocument(
-                doc_id=f"supplier:{sid}:delivery",
+                doc_id=f"supplier:{sid}",
                 doc_type="supplier",
                 entity_id=sid,
-                title=f"Supplier {sid} Delivery Performance",
-                content=f"Supplier {sid} has handled {total_orders:,} total purchase orders ({total_units:,} units). {late_orders:,} orders arrived late, resulting in a late-delivery rate of {late_rate * 100:.1f}% and an average delivery delay of {avg_delay:.1f} days.",
-                metadata={**base_meta, "topic": "delivery_performance"},
-            ))
-
-            # Chunk 3: Lead-Time Behavior
-            documents.append(KnowledgeDocument(
-                doc_id=f"supplier:{sid}:lead_time",
-                doc_type="supplier",
-                entity_id=sid,
-                title=f"Supplier {sid} Lead-Time Characteristics",
-                content=f"Supplier {sid} demonstrates an average fulfillment lead time of {avg_lead:.1f} days, with lead-time standard deviation of {std_lead:.1f} days reflecting delivery timeline variability.",
-                metadata={**base_meta, "topic": "lead_time_behavior"},
-            ))
-
-            # Chunk 4: Disruption History
-            documents.append(KnowledgeDocument(
-                doc_id=f"supplier:{sid}:disruption",
-                doc_type="supplier",
-                entity_id=sid,
-                title=f"Supplier {sid} Disruption Exposure",
-                content=f"Supplier {sid} has recorded a disruption rate of {disr_rate * 100:.1f}% across historical orders, impacting fulfillment continuity.",
-                metadata={**base_meta, "topic": "disruption_history"},
-            ))
-
-            # Chunk 5: Risk Assessment
-            documents.append(KnowledgeDocument(
-                doc_id=f"supplier:{sid}:risk",
-                doc_type="supplier",
-                entity_id=sid,
-                title=f"Supplier {sid} Risk Assessment",
-                content=f"Supplier {sid} has an overall risk score of {risk_score:.1f}/100 and is classified as {risk_level} Risk. Operational drivers: {risk_reason}.",
-                metadata={**base_meta, "topic": "risk_assessment"},
+                title=f"Supplier {sid} ({sname}) Performance & Relationship Profile",
+                content="\n".join(content_lines),
+                metadata=base_meta,
             ))
 
         return documents

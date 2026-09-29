@@ -17,6 +17,9 @@ class LeadTimeAnomalyAnalyzer:
         supplier_id: str | None = None,
         recent_days: int = 90,
         top_n: int = 15,
+        trend: str | None = None,
+        operation: str | None = None,
+        direction: str | None = None,
     ) -> dict[str, Any]:
         if orders is None or orders.empty:
             return {
@@ -117,9 +120,30 @@ class LeadTimeAnomalyAnalyzer:
         merged["anomaly_status"] = merged.apply(classify_status, axis=1)
         merged["is_anomaly"] = merged["anomaly_status"].isin(["Significant Increase", "Moderate Increase"])
 
-        # Sort by absolute change descending
-        merged = merged.sort_values(by="absolute_change", ascending=False)
-        top_results = merged.head(top_n).reset_index()
+        # Filter and sort based on trend / direction / operation
+        if trend == "decrease" or direction == "ascending":
+            merged = merged.sort_values(by="absolute_change", ascending=True)
+            # Prioritize negative change if present
+            neg_subset = merged[merged["absolute_change"] < 0]
+            if not neg_subset.empty:
+                merged = neg_subset
+        elif trend == "unusual":
+            merged = merged.sort_values(by="z_score", ascending=False)
+            anom_subset = merged[merged["is_anomaly"]]
+            if not anom_subset.empty:
+                merged = anom_subset
+        else:
+            # Increasing or general ranking
+            merged = merged.sort_values(by="absolute_change", ascending=False)
+            if trend == "increase":
+                pos_subset = merged[merged["absolute_change"] > 0]
+                if not pos_subset.empty:
+                    merged = pos_subset
+
+        if operation == "rank" and (trend == "increase" or direction == "descending") and top_n == 1:
+            top_results = merged.head(1).reset_index()
+        else:
+            top_results = merged.head(top_n).reset_index()
 
         findings = []
         evidence = []

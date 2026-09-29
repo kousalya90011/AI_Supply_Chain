@@ -118,6 +118,23 @@ function buildEvidenceReason(item) {
   const orders = getEvidenceValue(item, ["total_orders", "totalOrders", "order_count"]);
   const riskLevel = getEvidenceValue(item, ["risk_level", "riskLevel"]);
 
+  // Delivery performance & carrier evidence
+  const lateOrders = getEvidenceValue(item, ["late_orders", "lateOrders"]);
+  const onTimeRate = getEvidenceValue(item, ["on_time_rate", "onTimeRate"]);
+  const threePl = getEvidenceValue(item, ["three_pl", "3pl"]);
+
+  if (threePl && lateRate !== undefined) {
+    const delayStr = delay !== undefined ? `, with ${formatNumber(delay, 2)} days average delay` : "";
+    const orderStr = orders !== undefined ? ` across ${formatInteger(orders)} shipments` : "";
+    return `Carrier ${threePl} demonstrates a ${formatPercentage(lateRate)} late delivery rate${delayStr}${orderStr}.`;
+  }
+
+  if (orders !== undefined && lateOrders !== undefined && lateRate !== undefined) {
+    const onTimeStr = onTimeRate !== undefined ? `${formatPercentage(onTimeRate)} on-time rate (${formatInteger(orders - lateOrders)} orders), ` : "";
+    const delayStr = delay !== undefined ? `, average delay ${formatNumber(delay, 2)} days` : "";
+    return `Network Delivery Performance: ${onTimeStr}${formatPercentage(lateRate)} late rate (${formatInteger(lateOrders)} late orders out of ${formatInteger(orders)} total)${delayStr}.`;
+  }
+
   if (sid && lateRate !== undefined) {
     const delayStr = delay !== undefined ? `, with ${formatNumber(delay, 1)} days average delay` : "";
     const orderStr = orders !== undefined ? ` across ${formatInteger(orders)} orders` : "";
@@ -179,8 +196,17 @@ function buildEvidenceProof(item) {
 
   const facts = [];
 
+  const lateOrdersProof = getEvidenceValue(item, ["late_orders", "lateOrders"]);
+  const onTimeRateProof = getEvidenceValue(item, ["on_time_rate", "onTimeRate"]);
+  const threePlProof = getEvidenceValue(item, ["three_pl", "3pl"]);
+
+  if (threePlProof) facts.push(`Carrier: ${threePlProof}`);
   if (pid) facts.push(`Product: ${pid}`);
   if (sid) facts.push(`Supplier: ${sid}${sname ? ` (${sname})` : ""}`);
+  if (totalOrders !== undefined) facts.push(`Total Orders: ${formatInteger(totalOrders)}`);
+  if (lateOrdersProof !== undefined) facts.push(`Late Orders: ${formatInteger(lateOrdersProof)}`);
+  if (late !== undefined) facts.push(`Late Rate: ${formatPercentage(late)}`);
+  if (onTimeRateProof !== undefined) facts.push(`On-Time Rate: ${formatPercentage(onTimeRateProof)}`);
   if (recentLt !== undefined) facts.push(`Recent Lead Time: ${formatNumber(recentLt, 1)}d`);
   if (histLt !== undefined) facts.push(`Baseline: ${formatNumber(histLt, 1)}d`);
   if (chgLt !== undefined) {
@@ -189,12 +215,10 @@ function buildEvidenceProof(item) {
   }
   if (riskLevel !== undefined) facts.push(`Risk Level: ${String(riskLevel).toUpperCase()}`);
   if (riskScore !== undefined) facts.push(`Risk Score: ${formatNumber(riskScore, 1)}`);
-  if (late !== undefined) facts.push(`Late Rate: ${formatPercentage(late)}`);
   if (delay !== undefined) facts.push(`Avg Delay: ${formatNumber(delay, 1)}d`);
   if (stockout !== undefined) facts.push(`Stockout Rate: ${formatPercentage(stockout)}`);
   if (cover !== undefined) facts.push(`Days of Cover: ${formatNumber(cover, 1)}d`);
   if (totalDemand !== undefined) facts.push(`Total Demand: ${formatInteger(totalDemand)} units`);
-  if (totalOrders !== undefined) facts.push(`Total Orders: ${formatInteger(totalOrders)}`);
 
   if (facts.length === 0) {
     return "Verified deterministic evidence record.";
@@ -429,6 +453,44 @@ function extractKeyFindingsTable(response, evidence) {
     };
   }
 
+  // 1b. Disruption Impact Table
+  const disruptionItems = evidence.filter((item) => {
+    const disp = getEvidenceValue(item, ["disruption_rate", "disruptionRate"]);
+    const classification = getEvidenceValue(item, ["classification"]);
+    const exp = getEvidenceValue(item, ["exposure_score", "exposureScore"]);
+    const pid = getEvidenceValue(item, ["product_id", "productId"]);
+    return (disp !== undefined || exp !== undefined || classification !== undefined) && pid;
+  });
+
+  if (disruptionItems.length > 0) {
+    return {
+      type: "disruption_impact",
+      headers: ["Product", "Supplier", "Supplier Risk", "Disruption Rate", "Days Cover", "Classification"],
+      rows: disruptionItems.slice(0, 5).map((item) => {
+        const pid = getEvidenceValue(item, ["product_id", "productId"]);
+        const sid = getEvidenceValue(item, ["supplier_id", "supplierId"]);
+        const sname = getEvidenceValue(item, ["supplier_name", "supplierName"]);
+        const sRisk = getEvidenceValue(item, ["supplier_risk_level", "supplierRiskLevel"]) || "LOW";
+        const disp = getEvidenceValue(item, ["disruption_rate", "disruptionRate"]);
+        const doc = getEvidenceValue(item, ["days_of_cover", "daysOfCover"]);
+        const classification = getEvidenceValue(item, ["classification"]) || "affected";
+        return {
+          id: pid,
+          cells: [
+            pid,
+            sname ? `${sid} (${sname})` : (sid || "—"),
+            String(sRisk).toUpperCase(),
+            disp !== undefined ? formatPercentage(disp) : "0.0%",
+            doc !== undefined ? `${formatNumber(doc, 1)}d` : "—",
+            String(classification).replace("_", " ").toUpperCase(),
+          ],
+          highlightIndex: 5,
+          status: classification === "not_affected" || classification === "no_disruption_exposure" ? "LOW" : "HIGH",
+        };
+      }),
+    };
+  }
+
   // 2. Supplier Delivery Risk Table
   const supplierRiskItems = evidence.filter((item) => {
     const lr = getEvidenceValue(item, ["late_rate", "lateRate"]);
@@ -499,6 +561,45 @@ function extractKeyFindingsTable(response, evidence) {
     };
   }
 
+  // 4. Delivery Performance Table
+  const deliveryPerfItems = evidence.filter((item) => {
+    const tot = getEvidenceValue(item, ["total_orders", "totalOrders"]);
+    const late = getEvidenceValue(item, ["late_orders", "lateOrders"]);
+    const lr = getEvidenceValue(item, ["late_rate", "lateRate"]);
+    return tot !== undefined && late !== undefined && lr !== undefined;
+  });
+
+  if (deliveryPerfItems.length > 0) {
+    const hasCarriers = deliveryPerfItems.some((item) => getEvidenceValue(item, ["three_pl", "3pl"]));
+    return {
+      type: "delivery_performance",
+      headers: hasCarriers
+        ? ["Segment / Carrier", "Total Orders", "Late Orders", "Late Rate", "On-Time Rate", "Avg Delay"]
+        : ["Network Scope", "Total Orders", "Late Orders", "Late Rate", "On-Time Rate", "Avg Delay"],
+      rows: deliveryPerfItems.slice(0, 5).map((item) => {
+        const carrier = getEvidenceValue(item, ["three_pl", "3pl"]) || "Overall Network";
+        const tot = getEvidenceValue(item, ["total_orders", "totalOrders"]);
+        const late = getEvidenceValue(item, ["late_orders", "lateOrders"]);
+        const lr = getEvidenceValue(item, ["late_rate", "lateRate"]);
+        const otr = getEvidenceValue(item, ["on_time_rate", "onTimeRate"]) ?? (tot ? (tot - late) / tot : 0);
+        const delay = getEvidenceValue(item, ["avg_delay_days", "avg_delay", "average_delay"]);
+        return {
+          id: carrier,
+          cells: [
+            carrier,
+            formatInteger(tot),
+            formatInteger(late),
+            formatPercentage(lr),
+            formatPercentage(otr),
+            delay !== undefined ? `${formatNumber(delay, 2)}d` : "—",
+          ],
+          highlightIndex: 3,
+          status: lr > 0.5 ? "CRITICAL" : lr > 0.2 ? "HIGH" : "NORMAL",
+        };
+      }),
+    };
+  }
+
   return null;
 }
 
@@ -528,6 +629,20 @@ function extractKeyFindingsMetrics(evidence) {
   }
   if (forecastDemand !== undefined && forecastDemand !== totalDemand) {
     cards.push({ label: "Projected Horizon Demand", value: `${formatInteger(forecastDemand)} units` });
+  }
+
+  const totalOrders = getEvidenceValue(first, ["total_orders", "totalOrders"]);
+  const lateOrders = getEvidenceValue(first, ["late_orders", "lateOrders"]);
+  const lateRate = getEvidenceValue(first, ["late_rate", "lateRate"]);
+  const onTimeRate = getEvidenceValue(first, ["on_time_rate", "onTimeRate"]);
+  const avgDelay = getEvidenceValue(first, ["avg_delay_days", "avg_delay", "average_delay"]);
+
+  if (totalOrders !== undefined && lateOrders !== undefined) {
+    cards.push({ label: "Total Orders", value: formatInteger(totalOrders) });
+    cards.push({ label: "Late Orders", value: formatInteger(lateOrders) });
+    if (lateRate !== undefined) cards.push({ label: "Late Rate", value: formatPercentage(lateRate) });
+    if (onTimeRate !== undefined) cards.push({ label: "On-Time Rate", value: formatPercentage(onTimeRate) });
+    if (avgDelay !== undefined) cards.push({ label: "Avg Delay", value: `${formatNumber(avgDelay, 2)} days` });
   }
 
   return cards;

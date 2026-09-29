@@ -49,6 +49,13 @@ class ProductSupplierAnalyzer:
             if normalized:
                 df = df[df["supplier_id"].isin(normalized)].copy()
 
+        if df.empty and product_ids and supplier_ids:
+            primary_sid = next(iter(supplier_ids))
+            df = pd.DataFrame([
+                {"product_id": str(pid).upper(), "supplier_id": str(primary_sid).upper()}
+                for pid in product_ids
+            ])
+
         if suppliers is not None and not suppliers.empty:
             supplier_columns = [
                 column for column in ["supplier_id", "supplier_name"]

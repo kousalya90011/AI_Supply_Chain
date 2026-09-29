@@ -34,6 +34,10 @@ ALLOWED_METRICS = {
     "major_risks",
     "supplier_investigation",
     "supplier_inventory_impact",
+    "delivery_performance",
+    "delivery_analysis",
+    "on_time_rate",
+    "late_orders",
 }
 
 
@@ -44,6 +48,7 @@ ENTITY_TYPES = {
     "3pl",
     "order",
     "supply_chain",
+    "delivery",
 }
 
 
@@ -57,6 +62,7 @@ ALLOWED_OPERATIONS = {
     "impact_analysis",
     "investigate",
     "lookup",
+    "filter",
     "clarify",
 }
 
@@ -483,10 +489,7 @@ class QueryPlanValidator:
                 )
             )
 
-        if entity == "3pl":
-            return True
-
-        if entity == "order":
+        if entity in {"3pl", "order", "delivery", "supply_chain"}:
             return True
 
         return False

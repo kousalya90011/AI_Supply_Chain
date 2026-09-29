@@ -34,6 +34,7 @@ Operation = Literal[
     "impact_analysis",
     "investigate",
     "lookup",
+    "filter",
     "clarify",
 ]
 
@@ -92,6 +93,28 @@ class QueryRequirement(BaseModel):
         default_factory=dict
     )
 
+    condition: str | None = None
+
+    negative_condition: bool = False
+
+    threshold: dict[str, Any] | None = None
+
+    trend: str | None = None
+
+    comparison: dict[str, Any] | None = None
+
+    aggregation: str | None = None
+
+    entity_ids: list[str] = Field(
+        default_factory=list
+    )
+
+    scope: str | None = None
+
+    driver: str | None = None
+
+    topic: str | None = None
+
     purpose: str | None = None
 
     confidence: float = 0.0
@@ -119,9 +142,29 @@ class QueryPlan(BaseModel):
 
     entity_id: str | None = None
 
+    entity_ids: list[str] = Field(
+        default_factory=list
+    )
+
     filters: dict[str, Any] = Field(
         default_factory=dict
     )
+
+    condition: str | None = None
+
+    negative_condition: bool = False
+
+    threshold: dict[str, Any] | None = None
+
+    trend: str | None = None
+
+    scope: str | None = None
+
+    aggregation: str | None = None
+
+    driver: str | None = None
+
+    topic: str | None = None
 
     time_range: dict[str, Any] | None = None
 
@@ -164,3 +207,7 @@ class QueryPlan(BaseModel):
     secondary_metric: str | None = None
 
     relationship: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+

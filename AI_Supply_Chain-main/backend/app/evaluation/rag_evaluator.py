@@ -297,6 +297,113 @@ DEFAULT_BENCHMARK_CASES: list[EvaluationBenchmarkCase] = [
         expected_fallback=True,
         notes="Graceful fallback for non-supply-chain query",
     ),
+
+    # --------------------------------------------------------
+    # 13. Affected products
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_13_affected_products",
+        query="Which products are affected by supplier disruptions?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Identify products with elevated exposure to supplier disruptions",
+        expected_retrieval_modes=["structured", "hybrid"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="supply_chain",
+        notes="Deterministic filter for products meeting supplier disruption exposure criteria",
+    ),
+
+    # --------------------------------------------------------
+    # 14. Unaffected products
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_14_unaffected_products",
+        query="Which products are not affected by supplier disruptions?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Identify products not affected by supplier disruptions (complement set)",
+        expected_retrieval_modes=["structured", "hybrid"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="supply_chain",
+        notes="Deterministic complement population for products outside disruption criteria",
+    ),
+
+    # --------------------------------------------------------
+    # 15. Highest delivery risk suppliers
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_15_highest_risk_suppliers",
+        query="Which suppliers have the highest delivery risk?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Rank suppliers with highest delivery delay and late rate",
+        expected_retrieval_modes=["structured", "hybrid"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="supplier",
+        notes="Rank suppliers descending by delivery late rate",
+    ),
+
+    # --------------------------------------------------------
+    # 16. Lowest delivery risk suppliers
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_16_lowest_risk_suppliers",
+        query="Which suppliers have low delivery risk?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Filter suppliers with low delivery risk and high on-time delivery",
+        expected_retrieval_modes=["structured", "hybrid"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="supplier",
+        notes="Filter suppliers with low late rate and stable delivery",
+    ),
+
+    # --------------------------------------------------------
+    # 17. Delivery performance
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_17_delivery_performance",
+        query="What is my performance in delivery?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Report quantitative delivery performance metrics",
+        expected_retrieval_modes=["structured", "hybrid"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="delivery",
+        notes="Network or supplier delivery metrics including on-time rate and late orders",
+    ),
+
+    # --------------------------------------------------------
+    # 18. Inventory risk explanation
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_18_inventory_explanation",
+        query="Why is product P00003 at inventory risk?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Explain inventory risk factors for product P00003",
+        expected_retrieval_modes=["structured", "hybrid", "semantic"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="inventory",
+        expected_entity_id="P00003",
+        notes="Explain stockout rate and days of cover for target product",
+    ),
+
+    # --------------------------------------------------------
+    # 19. Supplier-product relationship
+    # --------------------------------------------------------
+    EvaluationBenchmarkCase(
+        id="case_19_supplier_product_relationship",
+        query="What supplier provides P00003?",
+        role=UserRole.ADMIN.value,
+        expected_behavior="Identify the supplier supplying product P00003",
+        expected_retrieval_modes=["structured"],
+        expected_status="success",
+        expected_fallback=False,
+        expected_domain="supplier",
+        expected_entity_id="P00003",
+        notes="Relational mapping connecting product P00003 to its supplier",
+    ),
 ]
 
 

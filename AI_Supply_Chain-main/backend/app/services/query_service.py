@@ -8,7 +8,7 @@ from app.query.planner import SemanticQueryPlanner
 from app.query.validator import QueryPlanValidator
 from app.query.factory import create_analytics_registry
 from app.query.executor import QueryExecutor
-from app.query.scope import QueryScope, validate_query_authorization
+from app.query.scope import QueryScope, validate_query_authorization, supplier_ids_match
 from app.services.audit_service import AuditService
 from app.rag.structured_retriever import StructuredRetriever
 from app.rag.semantic_retriever import SemanticRetriever
@@ -342,6 +342,14 @@ class QueryService(HybridRAGService):
 
             combined_evidence = list(structured_evidence) + semantic_evidence
 
+            if user_scope and getattr(user_scope, "is_supplier", False) and user_scope.supplier_id:
+                user_sid = user_scope.supplier_id
+                for ev in combined_evidence:
+                    if isinstance(ev, dict) and isinstance(ev.get("data"), dict):
+                        ev_sid = ev["data"].get("supplier_id")
+                        if ev_sid and supplier_ids_match(ev_sid, user_sid):
+                            ev["data"]["supplier_id"] = user_sid
+
             # Determine retrieval_mode
             has_structured = len(structured_evidence) > 0
             has_semantic = len(semantic_evidence) > 0
@@ -673,6 +681,13 @@ class QueryService(HybridRAGService):
         # -----------------------------------------------------
 
         cleaned_evidence = clean_evidence_list(combined_evidence)
+
+        # Critical rule: Never return Evidence Records = 0 and Status = success for an evidence-dependent query.
+        is_evidence_dependent = result.get("operation") not in {"clarify", "greeting"} and result.get("intent") not in {"denied"}
+        if is_evidence_dependent and len(cleaned_evidence) == 0 and status == "success":
+            status = "insufficient_evidence"
+            result["status"] = "insufficient_evidence"
+
         sources = result.get("sources", ["Deterministic Analytics Engine"])
         retrieval_mode = result.get("retrieval_mode", "structured")
 
@@ -829,6 +844,31 @@ class QueryService(HybridRAGService):
                 "direction"
             ),
 
+            "condition": result.get(
+                "condition"
+            ),
+
+            "negative_condition": result.get(
+                "negative_condition",
+                False
+            ),
+
+            "threshold": result.get(
+                "threshold"
+            ),
+
+            "trend": result.get(
+                "trend"
+            ),
+
+            "comparison": result.get(
+                "comparison"
+            ),
+
+            "scope": result.get(
+                "scope"
+            ),
+
             # -------------------------------------------------
             # Planner
             # -------------------------------------------------
@@ -933,6 +973,24 @@ class QueryService(HybridRAGService):
             "execution_latency_ms": result.get(
                 "execution_latency_ms"
             ),
+
+            "requirements_resolved": (
+                result.get("successful_requirements") or len(requirement_results) or 1
+            ),
+
+            "technical_trace": {
+                "planner_confidence": planner_confidence,
+                "intent": intent,
+                "requirements_resolved": (
+                    result.get("successful_requirements") or len(requirement_results) or 1
+                ),
+                "evidence_records": len(cleaned_evidence),
+                "retrieval_method": retrieval_mode,
+                "fallback": fallback_used,
+                "fallback_used": fallback_used,
+                "execution_latency": result.get("execution_latency_ms") or round((time.perf_counter() - start_time) * 1000, 2),
+                "status": "success" if status == "success" else status,
+            },
 
             "fallback_reason": (
                 result.get(
@@ -1876,6 +1934,10 @@ class QueryService(HybridRAGService):
         result: dict[str, Any],
     ) -> str:
 
+        intent = result.get("intent")
+        if intent and intent != "unknown":
+            return intent
+
         domain = result.get(
             "domain"
         )
@@ -1887,6 +1949,19 @@ class QueryService(HybridRAGService):
         metric = result.get(
             "metric"
         )
+
+        if metric in {
+            "delivery_performance",
+            "on_time_rate",
+            "late_orders",
+        }:
+            return "delivery_performance"
+
+        if metric == "delivery_analysis":
+            return "delivery_analysis"
+
+        if metric == "supplier_delivery_risk":
+            return "supplier_delivery_risk"
 
         if metric == "total_sales":
 

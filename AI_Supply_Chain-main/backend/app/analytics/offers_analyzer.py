@@ -32,16 +32,28 @@ class OffersAnalyzer:
             query = active_db.query(SupplierOffer)
 
             if supplier_id:
-                query = query.filter(
-                    SupplierOffer.supplier_id == str(supplier_id).strip().upper()
-                )
+                sid = str(supplier_id).strip().upper()
+                from app.query.scope import normalize_supplier_id
+                norm_sid = normalize_supplier_id(sid)
+                variants = {sid}
+                if norm_sid and norm_sid.startswith("S") and norm_sid[1:].isdigit():
+                    num = int(norm_sid[1:])
+                    variants.update([f"S{num:04d}", f"S{num:03d}", f"S{num:02d}", f"S{num}"])
+                query = query.filter(SupplierOffer.supplier_id.in_(list(variants)))
 
             if supplier_ids:
-                allowed_sids = [
-                    str(s).strip().upper() for s in supplier_ids if s is not None
-                ]
+                allowed_sids = set()
+                from app.query.scope import normalize_supplier_id
+                for s in supplier_ids:
+                    if s is not None:
+                        sid = str(s).strip().upper()
+                        allowed_sids.add(sid)
+                        norm_sid = normalize_supplier_id(sid)
+                        if norm_sid and norm_sid.startswith("S") and norm_sid[1:].isdigit():
+                            num = int(norm_sid[1:])
+                            allowed_sids.update([f"S{num:04d}", f"S{num:03d}", f"S{num:02d}", f"S{num}"])
                 if allowed_sids:
-                    query = query.filter(SupplierOffer.supplier_id.in_(allowed_sids))
+                    query = query.filter(SupplierOffer.supplier_id.in_(list(allowed_sids)))
 
             if product_id:
                 query = query.filter(

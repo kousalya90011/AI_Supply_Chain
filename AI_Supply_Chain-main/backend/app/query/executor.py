@@ -217,7 +217,11 @@ class QueryExecutor:
 
         elif successful_requirements == 0:
 
-            if failed_requirements > 0:
+            if any(r.get("status") == "insufficient_evidence" for r in requirement_results):
+
+                overall_status = "insufficient_evidence"
+
+            elif failed_requirements > 0:
 
                 overall_status = "error"
 
@@ -313,6 +317,28 @@ class QueryExecutor:
             "entity": plan.entity,
 
             "entity_id": plan.entity_id,
+
+            "condition": getattr(plan, "condition", None),
+
+            "negative_condition": getattr(plan, "negative_condition", False),
+
+            "threshold": getattr(plan, "threshold", None),
+
+            "trend": getattr(plan, "trend", None),
+
+            "comparison": getattr(plan, "comparison", None),
+
+            "scope": getattr(plan, "scope", None),
+
+            "driver": getattr(plan, "driver", None),
+
+            "topic": getattr(plan, "topic", None),
+
+            "population_size": primary_result.get("population_size") if isinstance(primary_result, dict) else None,
+
+            "affected_count": primary_result.get("affected_count") if isinstance(primary_result, dict) else None,
+
+            "unaffected_count": primary_result.get("unaffected_count") if isinstance(primary_result, dict) else None,
 
             # -------------------------------------------------
             # Primary findings
@@ -469,8 +495,17 @@ class QueryExecutor:
         if user_scope and getattr(user_scope, "is_supplier", False):
             user_sid = user_scope.supplier_id or ""
             auth_products = get_supplier_authorized_products(user_sid)
+            from app.query.scope import normalize_supplier_id
+            norm_sid = normalize_supplier_id(user_sid)
+            sids = [user_sid]
+            if norm_sid and norm_sid.startswith("S") and norm_sid[1:].isdigit():
+                num = int(norm_sid[1:])
+                sids.extend([f"S{num:04d}", f"S{num:03d}", f"S{num:02d}", f"S{num}"])
+            seen_sids = set()
+            expanded_sids = [s for s in sids if not (s in seen_sids or seen_sids.add(s))]
+
             requirement_plan.filters["supplier_id"] = user_sid
-            requirement_plan.filters["supplier_ids"] = [user_sid]
+            requirement_plan.filters["supplier_ids"] = expanded_sids
             requirement_plan.filters["authorized_products"] = list(auth_products)
 
             if requirement_plan.entity == "supplier":
@@ -826,33 +861,44 @@ class QueryExecutor:
                 )
 
         # -----------------------------------------------------
-        # Explicit requirement entity ID
+        # Explicit requirement entity ID or comparison entities
         # -----------------------------------------------------
+
+        comparison_obj = getattr(requirement, "comparison", None) or getattr(parent_plan, "comparison", None)
+        entity_ids_list = list(getattr(requirement, "entity_ids", []) or getattr(parent_plan, "entity_ids", []))
+        comp_entities = []
+        if isinstance(comparison_obj, dict):
+            comp_entities = [str(e).strip().upper() for e in comparison_obj.get("entities", []) if e]
+        elif len(entity_ids_list) >= 2:
+            comp_entities = [str(e).strip().upper() for e in entity_ids_list if e]
 
         entity_id = requirement.entity_id
 
-        if entity_id:
-
+        if comp_entities:
+            if requirement.entity == "supplier" or any(e.startswith("S") for e in comp_entities):
+                filters["supplier_ids"] = comp_entities
+            elif requirement.entity == "product" or any(e.startswith("P") for e in comp_entities):
+                filters["product_ids"] = comp_entities
+            target_entity_id = None
+        elif entity_id:
+            target_entity_id = entity_id
             if requirement.entity == "product":
-
                 filters.setdefault(
                     "product_ids",
                     [entity_id],
                 )
-
             elif requirement.entity == "supplier":
-
                 filters.setdefault(
                     "supplier_ids",
                     [entity_id],
                 )
-
             elif requirement.entity == "route":
-
                 filters.setdefault(
                     "route_ids",
                     [entity_id],
                 )
+        else:
+            target_entity_id = None
 
         # -----------------------------------------------------
         # Parent filters
@@ -907,8 +953,16 @@ class QueryExecutor:
                 or "none"
             ),
             entity=requirement.entity,
-            entity_id=entity_id,
+            entity_id=target_entity_id,
+            entity_ids=comp_entities or entity_ids_list,
             filters=filters,
+            comparison=comparison_obj,
+            threshold=getattr(requirement, "threshold", None) or getattr(parent_plan, "threshold", None),
+            trend=getattr(requirement, "trend", None) or getattr(parent_plan, "trend", None),
+            negative_condition=getattr(requirement, "negative_condition", False) or getattr(parent_plan, "negative_condition", False),
+            condition=getattr(requirement, "condition", None) or getattr(parent_plan, "condition", None),
+            driver=getattr(requirement, "driver", None) or getattr(parent_plan, "driver", None),
+            topic=getattr(requirement, "topic", None) or getattr(parent_plan, "topic", None),
             confidence=(
                 requirement.confidence
                 or parent_plan.confidence

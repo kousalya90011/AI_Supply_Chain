@@ -10,12 +10,14 @@ from app.analytics.stockout_ranking import StockoutRankingAnalyzer
 from app.analytics.inventory_risk import InventoryRiskAnalyzer
 from app.analytics.supplier_risk import SupplierRiskAnalyzer
 from app.analytics.delivery_risk import DeliveryRiskAnalyzer
+from app.analytics.delivery_performance import DeliveryPerformanceAnalyzer
 from app.analytics.product_cost import ProductCostAnalyzer
 from app.analytics.product_supplier import ProductSupplierAnalyzer
 from app.analytics.offers_analyzer import OffersAnalyzer
 from app.analytics.lead_time_anomaly import LeadTimeAnomalyAnalyzer
 from app.analytics.supplier_disruption_impact import SupplierDisruptionImpactAnalyzer
 from app.analytics.major_risks import MajorRisksAnalyzer
+from app.analytics.forecasting import DemandForecaster
 
 from app.query.registry import AnalyticsRegistry
 from app.query.schema import QueryPlan
@@ -74,7 +76,7 @@ class AnalyticsAdapter:
 
         if dataframe.empty:
             return {
-                "status": "success",
+                "status": "insufficient_evidence",
                 "findings": [],
                 "evidence": [],
                 "message": (
@@ -85,29 +87,90 @@ class AnalyticsAdapter:
         dataframe = dataframe.copy()
 
         # =====================================================
-        # FILTER BY EXPLICIT ENTITY
+        # =====================================================
+        # FILTER BY EXPLICIT ENTITY / COMPARISON ENTITIES
         # =====================================================
 
-        if plan.entity_id and self.entity_column:
+        comp_entities = []
+        if getattr(plan, "comparison", None) and isinstance(plan.comparison, dict):
+            comp_entities = [str(e).strip().upper() for e in plan.comparison.get("entities", []) if e]
+        elif getattr(plan, "entity_ids", None) and len(plan.entity_ids) >= 2:
+            comp_entities = [str(e).strip().upper() for e in plan.entity_ids if e]
+
+        if comp_entities and self.entity_column and self.entity_column in dataframe.columns:
+            if self.entity_column == "supplier_id":
+                from app.query.scope import normalize_supplier_id
+                norm_comps = {normalize_supplier_id(e) for e in comp_entities}
+                col_series = dataframe[self.entity_column].astype(str).str.strip().str.upper()
+                norm_series = col_series.apply(normalize_supplier_id)
+                dataframe = dataframe[
+                    col_series.isin(comp_entities) | norm_series.isin(norm_comps)
+                ].copy()
+            else:
+                dataframe = dataframe[
+                    dataframe[self.entity_column].astype(str).str.upper().isin(comp_entities)
+                ].copy()
+        elif plan.entity_id and self.entity_column:
 
             if self.entity_column in dataframe.columns:
 
-                dataframe = dataframe[
-                    dataframe[self.entity_column]
-                    .astype(str)
-                    .str.upper()
-                    == str(plan.entity_id).upper()
-                ].copy()
+                target_id = str(plan.entity_id).strip().upper()
+                if self.entity_column == "supplier_id":
+                    from app.query.scope import normalize_supplier_id
+                    norm_target = normalize_supplier_id(target_id)
+                    col_series = dataframe[self.entity_column].astype(str).str.strip().str.upper()
+                    norm_series = col_series.apply(normalize_supplier_id)
+                    dataframe = dataframe[
+                        (col_series == target_id) | (norm_series == norm_target)
+                    ].copy()
+                else:
+                    dataframe = dataframe[
+                        dataframe[self.entity_column]
+                        .astype(str)
+                        .str.upper()
+                        == target_id
+                    ].copy()
+
+        # =====================================================
+        # FILTER BY THRESHOLD
+        # =====================================================
+
+        if getattr(plan, "threshold", None) and isinstance(plan.threshold, dict):
+            t_op = str(plan.threshold.get("operator", ">")).strip()
+            try:
+                t_val = float(plan.threshold.get("value", 0))
+            except (ValueError, TypeError):
+                t_val = 0.0
+            t_unit = str(plan.threshold.get("unit", "")).strip()
+
+            target_col = None
+            for cand in [plan.metric, "stockout_rate", "days_of_cover", "late_rate", "inventory_units"]:
+                if cand and cand in dataframe.columns:
+                    target_col = cand
+                    break
+
+            if target_col and target_col in dataframe.columns:
+                norm_val = t_val
+                # If percentage and column values are in 0.0 - 1.0 range (e.g. stockout_rate, late_rate)
+                if t_unit == "%" and norm_val > 1.0:
+                    max_in_col = dataframe[target_col].max()
+                    if max_in_col <= 1.0:
+                        norm_val = norm_val / 100.0
+
+                if t_op in {">", ">="}:
+                    dataframe = dataframe[dataframe[target_col] >= norm_val].copy()
+                elif t_op in {"<", "<="}:
+                    dataframe = dataframe[dataframe[target_col] <= norm_val].copy()
 
         if dataframe.empty:
 
             return {
-                "status": "success",
+                "status": "insufficient_evidence",
                 "findings": [],
                 "evidence": [],
                 "message": (
                     f"No data was found for "
-                    f"{plan.entity_id}."
+                    f"{plan.entity_id or 'the specified criteria'}."
                 ),
             }
 
@@ -128,7 +191,11 @@ class AnalyticsAdapter:
 
             pass
 
-        elif plan.operation == "rank":
+        elif plan.operation == "compare" or comp_entities:
+
+            dataframe = dataframe.head(len(comp_entities) if comp_entities else 5)
+
+        elif plan.operation in {"rank", "filter"}:
 
             dataframe = dataframe.head(5)
 
@@ -153,7 +220,7 @@ class AnalyticsAdapter:
             plan=plan,
         )
 
-        return {
+        resp = {
             "status": "success",
             "findings": records,
             "evidence": evidence,
@@ -162,6 +229,9 @@ class AnalyticsAdapter:
                 records=records,
             ),
         }
+        if hasattr(self, "last_metadata") and self.last_metadata:
+            resp.update(self.last_metadata)
+        return resp
 
     # =========================================================
     # RUN ANALYTICS
@@ -466,13 +536,27 @@ class AnalyticsAdapter:
             )
 
             if orders is not None and not orders.empty and allowed_sids:
+                from app.query.scope import normalize_supplier_id
+                norm_allowed = {normalize_supplier_id(s) for s in allowed_sids if s}
+                sids_col = orders["supplier_id"].astype(str).str.strip().str.upper()
+                norm_sids_col = sids_col.apply(normalize_supplier_id)
                 orders = orders[
-                    orders["supplier_id"].astype(str).str.upper().isin(allowed_sids)
+                    sids_col.isin(allowed_sids) | norm_sids_col.isin(norm_allowed)
                 ].copy()
 
-            return self.analyzer.analyze(
+            res_df = self.analyzer.analyze(
                 orders=orders
             )
+            cond = getattr(plan, "condition", None)
+            if cond == "low_risk":
+                if plan.operation == "filter":
+                    res_df = res_df[res_df["risk_level"].isin(["LOW", "MEDIUM"])].sort_values(by="late_rate", ascending=True)
+                elif plan.direction == "ascending":
+                    res_df = res_df.sort_values(by="late_rate", ascending=True)
+            elif cond == "high_risk":
+                if plan.operation == "filter":
+                    res_df = res_df[res_df["risk_level"].isin(["CRITICAL", "HIGH"])].sort_values(by="late_rate", ascending=False)
+            return res_df
 
         # =====================================================
         # DELIVERY RISK
@@ -491,6 +575,38 @@ class AnalyticsAdapter:
 
             return self.analyzer.analyze(
                 orders=orders
+            )
+
+        # =====================================================
+        # DELIVERY PERFORMANCE
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            DeliveryPerformanceAnalyzer,
+        ):
+
+            datasets = self._datasets()
+
+            orders = datasets.get(
+                "orders_extended"
+            )
+            if orders is None or orders.empty:
+                orders = datasets.get("orders")
+
+            if orders is not None and not orders.empty and allowed_sids:
+                from app.query.scope import normalize_supplier_id
+                norm_allowed = {normalize_supplier_id(s) for s in allowed_sids if s}
+                sids_col = orders["supplier_id"].astype(str).str.strip().str.upper()
+                norm_sids_col = sids_col.apply(normalize_supplier_id)
+                orders = orders[
+                    sids_col.isin(allowed_sids) | norm_sids_col.isin(norm_allowed)
+                ].copy()
+
+            return self.analyzer.analyze(
+                orders=orders,
+                plan=plan,
+                mode="analysis" if getattr(plan, "metric", None) == "delivery_analysis" else "performance",
             )
 
         # =====================================================
@@ -524,7 +640,16 @@ class AnalyticsAdapter:
             datasets = self._datasets()
             orders = datasets.get("orders_extended")
             sid = str(plan.entity_id) if plan.entity == "supplier" and plan.entity_id else None
-            res = self.analyzer.analyze(orders=orders, supplier_id=sid)
+            is_largest = "largest" in getattr(plan, "original_query", "").lower() or (getattr(plan, "operation", None) == "rank" and getattr(plan, "trend", None) == "increase")
+            top_n = 1 if is_largest else 15
+            res = self.analyzer.analyze(
+                orders=orders,
+                supplier_id=sid,
+                top_n=top_n,
+                trend=getattr(plan, "trend", None),
+                operation=plan.operation,
+                direction=plan.direction,
+            )
             return pd.DataFrame(res.get("findings", []))
 
         # =====================================================
@@ -538,7 +663,20 @@ class AnalyticsAdapter:
             datasets = self._datasets()
             sid = str(plan.entity_id) if plan.entity == "supplier" and plan.entity_id else None
             pid = str(plan.entity_id) if plan.entity == "product" and plan.entity_id else None
-            res = self.analyzer.analyze(datasets=datasets, supplier_id=sid, product_id=pid)
+            res = self.analyzer.analyze(
+                datasets=datasets,
+                supplier_id=sid,
+                product_id=pid,
+                condition=getattr(plan, "condition", None),
+                entity=plan.entity,
+            )
+            self.last_metadata = {
+                "population_size": res.get("population_size"),
+                "affected_count": res.get("affected_count"),
+                "unaffected_count": res.get("unaffected_count"),
+                "condition": res.get("condition"),
+                "entity": res.get("entity"),
+            }
             return pd.DataFrame(res.get("findings", []))
 
         # =====================================================
@@ -556,6 +694,40 @@ class AnalyticsAdapter:
                 if isinstance(data, dict):
                     findings.append({"risk_domain": domain, **data})
             return pd.DataFrame(findings)
+
+        # =====================================================
+        # DEMAND FORECASTING
+        # =====================================================
+
+        if isinstance(
+            self.analyzer,
+            DemandForecaster,
+        ):
+            datasets = self._datasets()
+            orders = datasets.get("orders_extended")
+            if orders is None or orders.empty:
+                orders = datasets.get("orders")
+
+            pid = str(plan.entity_id or "P00003").strip().upper()
+            res = self.analyzer.forecast_product(orders, product_id=pid, horizon=7)
+            if res.get("status") == "success":
+                rows = []
+                avg = res.get("average_recent_demand", 0.0)
+                slope = res.get("trend_per_day", 0.0)
+                tot_pred = sum(item.get("predicted_demand", 0.0) for item in res.get("forecast", []))
+                trend_dir = "increasing" if slope > 0.05 else ("decreasing" if slope < -0.05 else "stable")
+                for item in res.get("forecast", []):
+                    rows.append({
+                        "product_id": pid,
+                        "date": item.get("date"),
+                        "predicted_demand": item.get("predicted_demand"),
+                        "total_forecast_demand": round(tot_pred, 1),
+                        "average_recent_demand": round(avg, 2),
+                        "trend_per_day": round(slope, 3),
+                        "trend_direction": trend_dir,
+                    })
+                return pd.DataFrame(rows)
+            return pd.DataFrame()
 
         raise TypeError(
             "Unsupported analytics analyzer: "
@@ -592,6 +764,18 @@ class AnalyticsAdapter:
             return dataframe.reset_index(
                 drop=True
             )
+
+        if plan.metric == "supplier_disruption_impact" and getattr(plan, "condition", None) in {
+            "not_affected", "unaffected", "no_disruption", "no_disruption_exposure", "least_affected"
+        }:
+            return dataframe.reset_index(drop=True)
+
+        if (
+            plan.metric in {"late_rate", "supplier_delivery_risk"}
+            and getattr(plan, "condition", None) == "low_risk"
+            and plan.direction != "descending"
+        ):
+            return dataframe.sort_values(by="late_rate", ascending=True).reset_index(drop=True)
 
         metric = plan.metric
 
@@ -764,6 +948,24 @@ class AnalyticsAdapter:
                 lead = record.get("lead_time_days", 0)
                 val = round(float(price), 2)
                 explanation = f"Supplier {sid} offers {pid} at ${price:.2f} with {lead}d lead time."
+            elif metric in {"delivery_performance", "delivery_analysis"}:
+                tot = record.get("total_orders", 0)
+                late = record.get("late_orders", 0)
+                on_time = record.get("on_time_orders", tot - late)
+                lr = record.get("late_rate", 0.0)
+                otr = record.get("on_time_rate", 0.0)
+                delay = record.get("avg_delay_days", 0.0)
+                avg_late_delay = record.get("avg_delay_when_late", delay)
+                three_pl = record.get("three_pl")
+                val = round(float(lr) * 100, 2) if isinstance(lr, (int, float)) else lr
+                if three_pl:
+                    explanation = f"Carrier {three_pl}: {val:.2f}% late rate across {tot:,} orders, average delay {delay:.2f}d."
+                else:
+                    explanation = (
+                        f"Network delivery performance: {otr*100:.2f}% on-time rate ({on_time:,} orders), "
+                        f"{val:.2f}% late rate ({late:,} late orders out of {tot:,} total), "
+                        f"average delay {delay:.2f}d (average delay when late: {avg_late_delay:.2f}d)."
+                    )
             elif metric in {"late_rate", "supplier_delivery_risk"}:
                 sid = record.get("supplier_id") or plan.entity_id
                 lr = record.get("late_rate", 0.0)
@@ -786,6 +988,12 @@ class AnalyticsAdapter:
                 doc = record.get("days_of_cover", 0.0)
                 val = round(float(inv), 1) if isinstance(inv, (int, float)) else inv
                 explanation = f"Product {pid}: recorded inventory {val} units, days of cover {doc:.1f}d."
+            elif metric in {"forecast_demand", "forecast"}:
+                pid = record.get("product_id") or plan.entity_id
+                pred = record.get("total_forecast_demand") or record.get("predicted_demand", 0.0)
+                avg = record.get("average_recent_demand", 0.0)
+                val = pred
+                explanation = f"Product {pid} demand forecast: 7-day projected demand of {pred:.1f} units (recent average: {avg:.2f} units/day)."
             elif metric == "lead_time_anomaly":
                 sid = record.get("supplier_id") or plan.entity_id
                 diff = record.get("absolute_change_days", 0.0)
@@ -798,7 +1006,11 @@ class AnalyticsAdapter:
                 sid = record.get("supplier_id")
                 score = record.get("exposure_score") if record.get("exposure_score") is not None else record.get("disruption_exposure_score", 0.0)
                 val = round(float(score), 1) if isinstance(score, (int, float)) else score
-                explanation = f"Product {pid} (Supplier {sid}): disruption exposure score {val}/100."
+                if record.get("classification_reason"):
+                    explanation = str(record["classification_reason"])
+                else:
+                    classification = record.get("classification", "evaluated")
+                    explanation = f"Product {pid} (Supplier {sid}): disruption exposure score {val}/100 ({classification})."
             elif metric == "major_risks":
                 domain = record.get("risk_domain", "risk_domain")
                 val = domain
@@ -1096,6 +1308,46 @@ def create_analytics_registry(
         ),
     )
 
+    registry.register(
+        "delivery_performance",
+        AnalyticsAdapter(
+            analyzer=DeliveryPerformanceAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column=None,
+        ),
+    )
+
+    registry.register(
+        "delivery_analysis",
+        AnalyticsAdapter(
+            analyzer=DeliveryPerformanceAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column=None,
+        ),
+    )
+
+    registry.register(
+        "on_time_rate",
+        AnalyticsAdapter(
+            analyzer=DeliveryPerformanceAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column=None,
+        ),
+    )
+
+    registry.register(
+        "late_orders",
+        AnalyticsAdapter(
+            analyzer=DeliveryPerformanceAnalyzer(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column=None,
+        ),
+    )
+
     # =========================================================
     # OFFERS
     # =========================================================
@@ -1161,6 +1413,26 @@ def create_analytics_registry(
             data_service=data_service,
             dataset_name="orders_extended",
             entity_column="supplier_id",
+        ),
+    )
+
+    registry.register(
+        "forecast_demand",
+        AnalyticsAdapter(
+            analyzer=DemandForecaster(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column="product_id",
+        ),
+    )
+
+    registry.register(
+        "forecast",
+        AnalyticsAdapter(
+            analyzer=DemandForecaster(),
+            data_service=data_service,
+            dataset_name="orders_extended",
+            entity_column="product_id",
         ),
     )
 

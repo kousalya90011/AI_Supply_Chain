@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.llm.query_classifier import QueryClassifier
+from app.query.interpreter import SemanticQueryInterpreter
 from app.query.schema import QueryPlan, QueryRequirement
 
 
@@ -16,40 +17,25 @@ class SemanticQueryPlanner:
 
         User Query
              ↓
-        QueryClassifier
+        SemanticQueryInterpreter (Reusable Semantic Interpretation Layer)
              ↓
-        Semantic Classification
+        Structured Semantic Dimensions (Intent, Domain, Metric, Operation,
+                                         Direction, Condition, Threshold,
+                                         Comparison, Trend, Scope, Entity IDs)
              ↓
         QueryPlan
              ├── primary fields
              └── requirements[]
                     ├── requirement 0
                     ├── requirement 1
-                    ├── requirement 2
                     └── requirement N
 
-    Important architecture decision
-    --------------------------------
-
-    QueryClassifier is the ONLY semantic LLM component.
-
-    This planner does NOT call the LLM directly.
-
-    Responsibilities:
-
-        1. Call QueryClassifier.
-        2. Convert classification -> QueryPlan.
-        3. Preserve classifier requirements.
-        4. Extract explicit entity IDs.
-        5. Build a backward-compatible primary requirement.
-        6. Preserve legacy secondary fields where useful.
-        7. Provide a small deterministic fallback.
-
-    There is intentionally NO artificial limit on the number
-    of requirements.
+    Deterministic fallback and LLM classification are maintained as
+    secondary mechanisms.
     """
 
     def __init__(self) -> None:
+        self.interpreter = SemanticQueryInterpreter()
         self.classifier = QueryClassifier()
 
     # =========================================================
@@ -75,6 +61,28 @@ class SemanticQueryPlanner:
             )
 
         try:
+            # 1. Primary: Reusable Semantic Query Interpreter
+            interpreted = self.interpreter.interpret(cleaned_query)
+
+            if interpreted.get("intent") == "unsupported" or interpreted.get("method") == "unsupported_domain":
+                return QueryPlan(
+                    domain="supply_chain",
+                    operation="clarify",
+                    confidence=0.0,
+                    clarification_question=(
+                        "What supply-chain information would you like to know?"
+                    ),
+                    original_query=cleaned_query,
+                    planner_method="unsupported_fallback",
+                )
+
+            if interpreted.get("intent") != "unknown" and interpreted.get("operation") != "clarify":
+                return self._interpreted_to_plan(
+                    query=cleaned_query,
+                    interpreted=interpreted,
+                )
+
+            # 2. Secondary: LLM Query Classifier
             classification = self.classifier.classify(
                 cleaned_query
             )
@@ -92,6 +100,67 @@ class SemanticQueryPlanner:
                 query=cleaned_query,
                 error=str(exc),
             )
+
+    # =========================================================
+    # INTERPRETED QUERY -> QUERY PLAN
+    # =========================================================
+
+    def _interpreted_to_plan(
+        self,
+        query: str,
+        interpreted: dict[str, Any],
+    ) -> QueryPlan:
+        reqs = []
+        conf = float(interpreted.get("confidence", 0.95))
+        for r in interpreted.get("requirements", []):
+            reqs.append(
+                QueryRequirement(
+                    domain=r.get("domain"),
+                    operation=r.get("operation", "lookup"),
+                    metric=r.get("metric"),
+                    direction=r.get("direction", "none"),
+                    entity=r.get("entity"),
+                    entity_id=r.get("entity_id"),
+                    relationship=r.get("relationship"),
+                    depends_on=r.get("depends_on"),
+                    filters=r.get("filters", {}),
+                    condition=r.get("condition"),
+                    negative_condition=r.get("negative_condition", False),
+                    threshold=r.get("threshold"),
+                    trend=r.get("trend"),
+                    comparison=r.get("comparison"),
+                    entity_ids=r.get("entity_ids", []),
+                    scope=r.get("scope"),
+                    driver=r.get("driver"),
+                    topic=r.get("topic"),
+                    purpose=r.get("purpose"),
+                    confidence=float(r.get("confidence", conf)),
+                )
+            )
+
+        op = interpreted.get("operation", "lookup")
+        return QueryPlan(
+            domain=interpreted.get("domain"),
+            operation=op,
+            metric=interpreted.get("metric"),
+            direction=interpreted.get("direction", "none"),
+            entity=interpreted.get("entity"),
+            entity_id=interpreted.get("entity_id"),
+            entity_ids=interpreted.get("entity_ids", []),
+            condition=interpreted.get("condition"),
+            negative_condition=interpreted.get("negative_condition", False),
+            threshold=interpreted.get("threshold"),
+            trend=interpreted.get("trend"),
+            comparison=interpreted.get("comparison"),
+            scope=interpreted.get("scope"),
+            driver=interpreted.get("driver"),
+            topic=interpreted.get("topic"),
+            requirements=reqs,
+            requires_reasoning=(len(reqs) > 1 or op == "explain"),
+            confidence=conf,
+            original_query=query,
+            planner_method=interpreted.get("method", "semantic_interpreter"),
+        )
 
     # =========================================================
     # CLASSIFICATION -> QUERY PLAN
@@ -344,14 +413,22 @@ class SemanticQueryPlanner:
         # Supplier delivery risk
         # -----------------------------------------------------
 
-        if intent == "supplier_delivery_risk":
+        if intent in {"supplier_delivery_risk", "supplier_risk"}:
+            is_low = any(w in query.lower() for w in ["low", "lowest", "least", "safe", "safest", "minimum"])
+            is_rank = any(w in query.lower() for w in ["highest", "lowest", "most", "least", "top", "bottom", "rank"])
+            cond = (classification or {}).get("condition") or ("low_risk" if is_low else "high_risk")
+            op = (classification or {}).get("operation") or ("rank" if is_rank else "filter")
+            dir_val = (classification or {}).get("direction") or ("ascending" if is_low else "descending")
             return QueryPlan(
                 domain="supplier",
-                operation="rank",
+                operation=op,
                 metric="late_rate",
-                direction="descending",
+                direction=dir_val,
                 entity="supplier",
                 entity_id=entity_id,
+                condition=cond,
+                driver=(classification or {}).get("driver", "delivery delay"),
+                topic=(classification or {}).get("topic", "delivery_risk"),
                 requires_reasoning=True,
                 confidence=confidence,
                 original_query=query,
@@ -359,17 +436,24 @@ class SemanticQueryPlanner:
             )
 
         # -----------------------------------------------------
-        # Product disruption impact
+        # Product & Supplier disruption impact
         # -----------------------------------------------------
 
-        if intent == "product_disruption_impact" or metric == "supplier_disruption_impact":
+        if intent in {"product_disruption_impact", "supplier_disruption_impact", "product_supplier_disruption_impact"} or metric == "supplier_disruption_impact":
+            ent = entity or ("supplier" if intent == "supplier_disruption_impact" or (entity_id and str(entity_id).upper().startswith("S")) else "product")
+            cond = (classification or {}).get("condition") or ("not_affected" if any(w in query.lower() for w in ["not", "unaffected", "least", "no "]) else "affected")
+            op = (classification or {}).get("operation") or ("rank" if any(w in query.lower() for w in ["most", "least", "rank"]) else "filter")
+            dir_val = (classification or {}).get("direction") or ("ascending" if cond in {"not_affected", "no_disruption_exposure"} else "descending")
             return QueryPlan(
-                domain="product",
-                operation="rank",
+                domain=ent,
+                operation=op,
                 metric="supplier_disruption_impact",
-                direction="descending",
-                entity="product",
+                direction=dir_val,
+                entity=ent,
                 entity_id=entity_id,
+                condition=cond,
+                driver=(classification or {}).get("driver", "supplier disruption"),
+                topic=(classification or {}).get("topic", "supplier_disruption"),
                 requires_reasoning=True,
                 confidence=confidence,
                 original_query=query,
@@ -441,6 +525,42 @@ class SemanticQueryPlanner:
                 metric="supplier_disruption_impact",
                 direction="descending",
                 entity="product",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Delivery performance
+        # -----------------------------------------------------
+
+        if intent == "delivery_performance":
+            return QueryPlan(
+                domain="delivery",
+                operation="summarize",
+                metric="delivery_performance",
+                direction="none",
+                entity="delivery",
+                entity_id=entity_id,
+                requires_reasoning=True,
+                confidence=confidence,
+                original_query=query,
+                planner_method=method,
+            )
+
+        # -----------------------------------------------------
+        # Delivery analysis
+        # -----------------------------------------------------
+
+        if intent == "delivery_analysis":
+            return QueryPlan(
+                domain="delivery",
+                operation="explain",
+                metric="delivery_analysis",
+                direction="descending",
+                entity="delivery",
                 entity_id=entity_id,
                 requires_reasoning=True,
                 confidence=confidence,
@@ -831,6 +951,18 @@ class SemanticQueryPlanner:
             "purpose"
         )
 
+        condition = raw_requirement.get(
+            "condition"
+        ) or plan.condition
+
+        driver = raw_requirement.get(
+            "driver"
+        ) or plan.driver
+
+        topic = raw_requirement.get(
+            "topic"
+        ) or plan.topic
+
         confidence = self._safe_float(
             raw_requirement.get(
                 "confidence"
@@ -948,6 +1080,11 @@ class SemanticQueryPlanner:
         ):
             return None
 
+        if index == 0:
+            if plan.operation in {"explain", "filter"} and operation != plan.operation:
+                operation = plan.operation
+                direction = plan.direction
+
         return QueryRequirement(
             domain=domain,
             operation=operation,
@@ -959,6 +1096,9 @@ class SemanticQueryPlanner:
             depends_on=depends_on,
             filters=filters,
             purpose=purpose,
+            condition=condition,
+            driver=driver,
+            topic=topic,
             confidence=confidence,
         )
 
@@ -982,6 +1122,9 @@ class SemanticQueryPlanner:
             depends_on=None,
             filters=dict(plan.filters or {}),
             purpose="Primary analytical requirement",
+            condition=plan.condition,
+            driver=plan.driver,
+            topic=plan.topic,
             confidence=plan.confidence,
         )
 

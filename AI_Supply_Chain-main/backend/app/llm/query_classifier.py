@@ -98,11 +98,15 @@ class QueryClassifier:
         "order_analysis",
         "multi_requirement",
         "product_disruption_impact",
+        "product_supplier_disruption_impact",
+        "supplier_disruption_impact",
         "lead_time_anomaly",
         "supplier_investigation",
         "major_risks",
         "supplier_delivery_risk",
         "supplier_inventory_impact",
+        "delivery_performance",
+        "delivery_analysis",
         "unknown",
     }
 
@@ -138,6 +142,10 @@ class QueryClassifier:
         "major_risks",
         "supplier_investigation",
         "supplier_inventory_impact",
+        "delivery_performance",
+        "delivery_analysis",
+        "on_time_rate",
+        "late_orders",
         "late_rate",
         None,
     }
@@ -177,6 +185,7 @@ class QueryClassifier:
         "investigate",
         "lookup",
         "clarify",
+        "filter",
     }
 
     # =========================================================
@@ -1895,27 +1904,85 @@ Return only JSON.
             }
 
         # -----------------------------------------------------
-        # Product impact from supplier disruptions
+        # Product & Supplier impact from disruptions
         # -----------------------------------------------------
-        if (
-            self._contains_any(query, {"disruption", "disruptions", "disrupted"})
-            and self._contains_any(query, {"product", "products", "affected", "impact", "most affected", "vulnerable"})
-        ):
+        if self._contains_any(query, {"disruption", "disruptions", "disrupted"}):
+            is_supplier_query = (
+                self._contains_any(query, {"supplier", "suppliers"})
+                and not self._contains_any(query, {"product", "products", "item", "items", "sku", "skus"})
+            )
+            entity_type = "supplier" if is_supplier_query else "product"
+            domain = "supplier" if is_supplier_query else "product"
+            intent = "supplier_disruption_impact" if is_supplier_query else "product_disruption_impact"
+
+            is_zero_disr = (
+                "no supplier disruption exposure" in query.lower()
+                or "no disruption exposure" in query.lower()
+                or "zero disruption" in query.lower()
+                or "no disruption" in query.lower()
+            )
+            is_negative = (
+                is_zero_disr
+                or self._contains_any(
+                    query,
+                    {
+                        "not affected",
+                        "not impacted",
+                        "unaffected",
+                        "least affected",
+                        "least disrupted",
+                        "lowest disruption",
+                        "free from disruption",
+                        "immune to disruption",
+                        "without disruption",
+                    },
+                )
+            )
+
+            if is_zero_disr:
+                condition = "no_disruption_exposure"
+            elif is_negative:
+                condition = "not_affected"
+            else:
+                condition = "affected"
+
+            if self._contains_any(query, {"why is", "why are", "explain"}):
+                operation = "explain"
+                direction = "none"
+            elif self._contains_any(query, {"most", "highest", "top", "worst"}):
+                operation = "rank"
+                direction = "descending"
+            elif self._contains_any(query, {"least", "lowest", "bottom"}):
+                operation = "rank"
+                direction = "ascending"
+            else:
+                operation = "filter"
+                direction = "ascending" if is_negative else "descending"
+
             return {
-                "intent": "product_disruption_impact",
+                "intent": intent,
                 "metric": "supplier_disruption_impact",
-                "scope": "product",
+                "scope": entity_type,
                 "complexity": "simple",
                 "requires_entity": False,
-                "confidence": 0.92,
+                "confidence": 0.95,
+                "entity": entity_type,
+                "condition": condition,
+                "driver": "supplier disruption",
+                "topic": "supplier_disruption",
+                "operation": operation,
+                "direction": direction,
                 "requirements": [
                     {
-                        "domain": "product",
-                        "operation": "rank",
+                        "domain": domain,
+                        "operation": operation,
                         "metric": "supplier_disruption_impact",
-                        "direction": "descending",
-                        "entity": "product",
+                        "direction": direction,
+                        "entity": entity_type,
                         "entity_id": None,
+                        "condition": condition,
+                        "driver": "supplier disruption",
+                        "topic": "supplier_disruption",
                         "depends_on": None,
                     }
                 ],
@@ -2005,12 +2072,163 @@ Return only JSON.
             }
 
         # -----------------------------------------------------
+        # Forecast
+        # -----------------------------------------------------
+        if self._contains_any(
+            query,
+            {
+                "forecast",
+                "forecasting",
+                "future demand",
+                "predicted demand",
+                "expected demand",
+                "predict demand",
+            },
+        ):
+            return {
+                "intent": "forecast",
+                "metric": "forecast_demand",
+                "scope": "forecast",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.88,
+                "requirements": [
+                    {
+                        "domain": "forecast",
+                        "operation": "forecast",
+                        "metric": "forecast_demand",
+                        "direction": "none",
+                        "entity": "product",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Delivery performance
+        # -----------------------------------------------------
+        if (
+            self._contains_any(
+                query,
+                {
+                    "performance in delivery",
+                    "performance on delivery",
+                    "delivery performance",
+                    "how many orders were late",
+                    "orders were late",
+                    "how many late orders",
+                    "what is the late delivery rate",
+                    "late delivery rate",
+                    "late order rate",
+                    "on-time delivery",
+                    "on time delivery",
+                    "on-time rate",
+                    "on time rate",
+                    "performance of delivery",
+                },
+            )
+            or (
+                "delivery" in query
+                and "performance" in query
+                and not self._contains_any(query, {"supplier", "suppliers"})
+            )
+            or (
+                "orders" in query
+                and "late" in query
+                and not self._contains_any(query, {"supplier", "suppliers"})
+            )
+        ):
+            return {
+                "intent": "delivery_performance",
+                "metric": "delivery_performance",
+                "scope": "delivery",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "delivery",
+                        "operation": "summarize",
+                        "metric": "delivery_performance",
+                        "direction": "none",
+                        "entity": "delivery",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
+        # Delivery analysis
+        # -----------------------------------------------------
+        if self._contains_any(
+            query,
+            {
+                "why are deliveries delayed",
+                "why are deliveries late",
+                "why deliveries are delayed",
+                "why deliveries are late",
+                "deliveries delayed",
+                "deliveries late",
+                "delivery delay causes",
+                "delivery analysis",
+                "causes of delivery delays",
+                "why delivery delays happen",
+            },
+        ):
+            return {
+                "intent": "delivery_analysis",
+                "metric": "delivery_analysis",
+                "scope": "delivery",
+                "complexity": "simple",
+                "requires_entity": False,
+                "confidence": 0.92,
+                "requirements": [
+                    {
+                        "domain": "delivery",
+                        "operation": "explain",
+                        "metric": "delivery_analysis",
+                        "direction": "descending",
+                        "entity": "delivery",
+                        "entity_id": None,
+                        "depends_on": None,
+                    }
+                ],
+            }
+
+        # -----------------------------------------------------
         # Supplier delivery delays / late risk
         # -----------------------------------------------------
         if (
-            self._contains_any(query, {"supplier", "suppliers"})
-            and self._contains_any(query, {"delivery delays", "delivery delay", "late delivery", "late deliveries", "delay risk", "delay risks", "high risk of delivery"})
+            (self._contains_any(query, {"supplier", "suppliers"}) or bool(re.search(r"\bS\d+\b", query.upper())))
+            and self._contains_any(
+                query,
+                {
+                    "delivery delays",
+                    "delivery delay",
+                    "late delivery",
+                    "late deliveries",
+                    "delay risk",
+                    "delay risks",
+                    "high risk of delivery",
+                    "high delivery risk",
+                    "low delivery risk",
+                    "lowest delivery risk",
+                    "delivery risk",
+                    "delivery risks",
+                    "causing delivery delays",
+                    "causing delays",
+                    "causing delay",
+                },
+            )
         ):
+            is_low = self._contains_any(query, {"low", "lowest", "least", "safe", "safest", "minimum"})
+            is_rank = self._contains_any(query, {"highest", "lowest", "most", "least", "top", "bottom", "rank"})
+            condition = "low_risk" if is_low else "high_risk"
+            direction = "ascending" if is_low else "descending"
+            operation = "rank" if is_rank else "filter"
+
             return {
                 "intent": "supplier_delivery_risk",
                 "metric": "late_rate",
@@ -2018,14 +2236,22 @@ Return only JSON.
                 "complexity": "simple",
                 "requires_entity": False,
                 "confidence": 0.92,
+                "condition": condition,
+                "driver": "delivery delay",
+                "topic": "delivery_risk",
+                "operation": operation,
+                "direction": direction,
                 "requirements": [
                     {
                         "domain": "supplier",
-                        "operation": "rank",
+                        "operation": operation,
                         "metric": "late_rate",
-                        "direction": "descending",
+                        "direction": direction,
                         "entity": "supplier",
                         "entity_id": None,
+                        "condition": condition,
+                        "driver": "delivery delay",
+                        "topic": "delivery_risk",
                         "depends_on": None,
                     }
                 ],
@@ -2317,22 +2543,31 @@ Return only JSON.
                 "risk score",
             },
         ):
+            extracted_pid = None
+            pid_match = re.search(r"\b(P\d{3,})\b", query, re.IGNORECASE)
+            if pid_match:
+                extracted_pid = pid_match.group(1).upper()
+            is_explain = self._contains_any(query, {"why is", "why are", "explain", "reason"}) or bool(extracted_pid)
 
             return {
                 "intent": "inventory_risk",
                 "metric": "risk_score",
                 "scope": "product",
                 "complexity": "simple",
-                "requires_entity": False,
-                "confidence": 0.80,
+                "requires_entity": bool(extracted_pid),
+                "entity_type": "product",
+                "entity_id": extracted_pid,
+                "confidence": 0.88 if extracted_pid else 0.80,
+                "operation": "explain" if is_explain else "rank",
+                "direction": "none" if is_explain else "descending",
                 "requirements": [
                     {
                         "domain": "inventory",
-                        "operation": "rank",
+                        "operation": "explain" if is_explain else "rank",
                         "metric": "risk_score",
-                        "direction": "descending",
+                        "direction": "none" if is_explain else "descending",
                         "entity": "product",
-                        "entity_id": None,
+                        "entity_id": extracted_pid,
                         "depends_on": None,
                     }
                 ],

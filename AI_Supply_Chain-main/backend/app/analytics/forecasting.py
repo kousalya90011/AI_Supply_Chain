@@ -45,6 +45,7 @@ class DemandForecaster:
             [
                 "date",
                 "demand_date",
+                "order_date",
                 "day",
                 "timestamp"
             ]
