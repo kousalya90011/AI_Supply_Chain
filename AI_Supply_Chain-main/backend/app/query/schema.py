@@ -21,6 +21,7 @@ Domain = Literal[
     "supply_chain",
     "dashboard",
     "offers",
+    "risk",
 ]
 
 
@@ -111,6 +112,12 @@ class QueryRequirement(BaseModel):
 
     scope: str | None = None
 
+    group_by: str | None = None
+
+    time_range: dict[str, Any] | str | None = None
+
+    requires_evidence: bool = True
+
     driver: str | None = None
 
     topic: str | None = None
@@ -169,6 +176,10 @@ class QueryPlan(BaseModel):
     time_range: dict[str, Any] | None = None
 
     comparison: dict[str, Any] | None = None
+
+    group_by: str | None = None
+
+    requires_evidence: bool = True
 
     # -----------------------------------------------------
     # Dynamic multi-requirement execution

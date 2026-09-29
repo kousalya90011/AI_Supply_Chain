@@ -297,28 +297,53 @@ class SemanticQueryInterpreter:
 
     def _detect_negation_and_polarity(self, text: str) -> dict[str, Any]:
         """
-        Distinguishes absolute negation from relative ranking or positive traits.
+        Distinguishes absolute negation, exclusion, and non-major polarity
+        from relative ranking or positive performance traits.
         """
-        has_absolute_negation = bool(re.search(
-            r"\b(no risk|not affected|not impacted|unaffected|unimpacted|immune to|free from|without disruption|no disruption|zero disruption|without significant|no significant)\b",
-            text
+        is_non_major = bool(re.search(
+            r"\b(non[- ]?major|not major|excluding major|outside major|other than major|except major)\b",
+            text,
+            re.IGNORECASE,
         ))
 
+        is_not_high = bool(re.search(
+            r"\b(not high|not high[- ]?risk|excluding high|outside high|not critical|non[- ]?critical)\b",
+            text,
+            re.IGNORECASE,
+        ))
+
+        is_no_stockout = bool(re.search(
+            r"\b(do not have stockout|does not have stockout|no stockout|without stockout|free from stockout|zero stockout|not have stockout)\b",
+            text,
+            re.IGNORECASE,
+        ))
+
+        has_absolute_negation = bool(re.search(
+            r"\b(no risk|not affected|not impacted|unaffected|unimpacted|immune to|free from|without disruption|no disruption|zero disruption|without significant|no significant|not experiencing|without|excluding|except|other than|outside)\b",
+            text,
+            re.IGNORECASE,
+        )) or is_non_major or is_not_high or is_no_stockout
+
         has_low_or_safe = bool(re.search(
-            r"\b(low|lowest|least|safe|safest|minimal|stable|good|best|performing well|minimal problems)\b",
-            text
+            r"\b(low|lowest|least|safe|safest|minimal|stable|good|best|performing well|minimal problems|acceptable)\b",
+            text,
+            re.IGNORECASE,
         ))
 
         is_least_relative = bool(re.search(
-            r"\b(least affected|least impacted|least likely|lowest risk|lowest delivery risk|lowest stockout risk)\b",
-            text
+            r"\b(least affected|least impacted|least likely|lowest risk|lowest delivery risk|lowest stockout risk|least delivery delays|least delays)\b",
+            text,
+            re.IGNORECASE,
         ))
 
         return {
             "has_absolute_negation": has_absolute_negation,
             "has_low_or_safe": has_low_or_safe,
             "is_least_relative": is_least_relative,
-            "is_negative": has_absolute_negation or has_low_or_safe,
+            "is_non_major": is_non_major,
+            "is_not_high": is_not_high,
+            "is_no_stockout": is_no_stockout,
+            "is_negative": has_absolute_negation or has_low_or_safe or is_non_major or is_not_high or is_no_stockout,
         }
 
     def _detect_ranking(self, text: str) -> dict[str, Any]:
@@ -671,6 +696,101 @@ class SemanticQueryInterpreter:
             }
 
         # ---------------------------------------------------------------------
+        # 1.5 CROSS-DOMAIN SUPPLY CHAIN RISKS (Major vs Non-Major vs Thresholds)
+        # ---------------------------------------------------------------------
+        is_major_or_network = (
+            ("major" in norm_text or "non major" in norm_text or "non-major" in norm_text or "not major" in norm_text)
+            and ("risk" in norm_text or "risks" in norm_text or "supply chain" in norm_text)
+        ) or (
+            ("supply chain risk" in norm_text or "supply chain risks" in norm_text or "network risk" in norm_text or "network risks" in norm_text)
+            and not any(k in norm_text for k in ["disruption", "cover", "inventory cover", "lead time"])
+            and not (primary_entity_id and (primary_entity_id.startswith("S") or primary_entity_id.startswith("P")))
+        )
+
+        if is_major_or_network:
+            is_non_major = (
+                negation_info.get("is_non_major")
+                or "non major" in norm_text
+                or "non-major" in norm_text
+                or "not major" in norm_text
+                or negation_info.get("has_absolute_negation")
+            )
+            cond = "non_major" if is_non_major else "major"
+            dir_val = "ascending" if is_non_major else "descending"
+
+            return {
+                "intent": "major_risks",
+                "domain": "risk",
+                "metric": "major_risks",
+                "operation": "filter",
+                "direction": dir_val,
+                "entity": "supply_chain",
+                "entity_id": None,
+                "entity_ids": [],
+                "condition": cond,
+                "negative_condition": is_non_major,
+                "requires_evidence": True,
+                "driver": "cross-domain risk synthesis",
+                "topic": "supply_chain_risk",
+                "confidence": 0.95,
+                "requirements": [
+                    {
+                        "domain": "risk",
+                        "operation": "filter",
+                        "metric": "major_risks",
+                        "direction": dir_val,
+                        "entity": "supply_chain",
+                        "condition": cond,
+                        "negative_condition": is_non_major,
+                        "requires_evidence": True,
+                        "driver": "cross-domain risk synthesis",
+                        "topic": "supply_chain_risk",
+                        "depends_on": None,
+                    }
+                ],
+                "method": "semantic_non_major_risks" if is_non_major else "semantic_major_risks",
+            }
+
+        # Threshold queries on general risks ("What are the risks above 60?", "What are the risks below 30?")
+        if ("risk" in norm_text or "risks" in norm_text) and threshold_info and not any(k in norm_text for k in ["stockout", "cover", "inventory", "lead_time", "delivery"]):
+            is_greater = threshold_info["operator"] in {">", ">="}
+            dir_val = "descending" if is_greater else "ascending"
+            cond = "high_risk" if is_greater else "low_risk"
+            neg = not is_greater
+
+            return {
+                "intent": "supplier_risk",
+                "domain": "supplier",
+                "metric": "risk_score",
+                "operation": "filter",
+                "direction": dir_val,
+                "entity": "supplier",
+                "entity_id": primary_entity_id,
+                "entity_ids": entity_ids,
+                "condition": cond,
+                "negative_condition": neg,
+                "threshold": threshold_info,
+                "requires_evidence": True,
+                "confidence": 0.95,
+                "requirements": [
+                    {
+                        "domain": "supplier",
+                        "operation": "filter",
+                        "metric": "risk_score",
+                        "direction": dir_val,
+                        "entity": "supplier",
+                        "entity_id": primary_entity_id,
+                        "condition": cond,
+                        "negative_condition": neg,
+                        "threshold": threshold_info,
+                        "requires_evidence": True,
+                        "depends_on": None,
+                    }
+                ],
+                "method": "semantic_risk_threshold",
+            }
+
+        # ---------------------------------------------------------------------
         # 2. DISRUPTION QUERIES (Products & Suppliers, Positive & Negative)
         # ---------------------------------------------------------------------
         if "disruption" in norm_text:
@@ -728,12 +848,20 @@ class SemanticQueryInterpreter:
         # ---------------------------------------------------------------------
         # 3. LEAD TIME & ANOMALIES
         # ---------------------------------------------------------------------
-        if "lead_time" in norm_text:
+        is_supplier_trend = (
+            "lead_time" in norm_text
+            or (
+                trend_info.get("trend") in {"increase", "decrease", "unusual"}
+                and not any(k in norm_text for k in ["demand", "forecast", "product", "sales"])
+            )
+        )
+        if is_supplier_trend:
             trend = trend_info.get("trend")
             op = trend_info.get("operation") or ("rank" if ranking_info["is_rank"] else "filter")
             dir_val = trend_info.get("direction") or ranking_info["direction"]
             if dir_val == "none":
                 dir_val = "descending" if trend == "increase" else ("ascending" if trend == "decrease" else "descending")
+            cond = "worsening" if trend == "increase" else ("improving" if trend == "decrease" else None)
 
             return {
                 "intent": "lead_time_anomaly",
@@ -744,7 +872,9 @@ class SemanticQueryInterpreter:
                 "entity": "supplier",
                 "entity_id": primary_entity_id,
                 "entity_ids": entity_ids,
+                "condition": cond,
                 "trend": trend or "unusual",
+                "requires_evidence": True,
                 "confidence": 0.95,
                 "requirements": [
                     {
@@ -754,7 +884,9 @@ class SemanticQueryInterpreter:
                         "direction": dir_val,
                         "entity": "supplier",
                         "entity_id": primary_entity_id,
+                        "condition": cond,
                         "trend": trend or "unusual",
+                        "requires_evidence": True,
                         "depends_on": None,
                     }
                 ],
@@ -853,8 +985,14 @@ class SemanticQueryInterpreter:
             }
 
         if "stockout" in norm_text:
-            is_low = negation_info["has_low_or_safe"] or ranking_info["direction"] == "ascending"
-            op = "filter" if threshold_info else "rank"
+            is_low = (
+                negation_info.get("has_absolute_negation")
+                or negation_info.get("is_no_stockout")
+                or negation_info.get("has_low_or_safe")
+                or ranking_info["direction"] == "ascending"
+            )
+            is_rank = ranking_info["is_rank"] and not (negation_info.get("is_no_stockout") or negation_info.get("has_absolute_negation"))
+            op = "filter" if (threshold_info or not is_rank) else "rank"
             dir_val = "ascending" if is_low else "descending"
             cond = "low_risk" if is_low else "high_risk"
 
@@ -870,6 +1008,7 @@ class SemanticQueryInterpreter:
                 "condition": cond,
                 "negative_condition": is_low,
                 "threshold": threshold_info,
+                "requires_evidence": True,
                 "confidence": 0.95,
                 "requirements": [
                     {
@@ -882,6 +1021,7 @@ class SemanticQueryInterpreter:
                         "condition": cond,
                         "negative_condition": is_low,
                         "threshold": threshold_info,
+                        "requires_evidence": True,
                         "depends_on": None,
                     }
                 ],
@@ -1021,9 +1161,15 @@ class SemanticQueryInterpreter:
                 or any(w in norm_text for w in ["highest", "lowest", "most", "least", "top", "bottom"])
             )
 
-            condition = "low_risk" if is_low else "high_risk"
-            operation = "filter" if threshold_info else ("rank" if is_rank else "filter")
-            direction = "ascending" if is_low else "descending"
+            if negation_info.get("is_not_high"):
+                condition = "not_high_risk"
+                is_low = True
+                operation = "filter"
+                direction = "ascending"
+            else:
+                condition = "low_risk" if is_low else "high_risk"
+                operation = "filter" if threshold_info else ("rank" if is_rank else "filter")
+                direction = "ascending" if is_low else "descending"
 
             return {
                 "intent": "supplier_risk",
@@ -1037,6 +1183,7 @@ class SemanticQueryInterpreter:
                 "condition": condition,
                 "negative_condition": is_low,
                 "threshold": threshold_info,
+                "requires_evidence": True,
                 "driver": "delivery delay",
                 "topic": "delivery_risk",
                 "confidence": 0.95,
@@ -1051,6 +1198,7 @@ class SemanticQueryInterpreter:
                         "condition": condition,
                         "negative_condition": is_low,
                         "threshold": threshold_info,
+                        "requires_evidence": True,
                         "driver": "delivery delay",
                         "topic": "delivery_risk",
                         "depends_on": None,

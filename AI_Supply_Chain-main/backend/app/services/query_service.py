@@ -402,6 +402,7 @@ class QueryService(HybridRAGService):
                 query=cleaned_query,
                 start_time=start_time,
                 user_scope=user_scope,
+                plan=plan,
             )
 
             if user_scope:
@@ -625,6 +626,7 @@ class QueryService(HybridRAGService):
         query: str,
         start_time: float,
         user_scope: QueryScope | None = None,
+        plan: Any | None = None,
     ) -> dict[str, Any]:
 
         status = result.get(
@@ -684,9 +686,19 @@ class QueryService(HybridRAGService):
 
         # Critical rule: Never return Evidence Records = 0 and Status = success for an evidence-dependent query.
         is_evidence_dependent = result.get("operation") not in {"clarify", "greeting"} and result.get("intent") not in {"denied"}
-        if is_evidence_dependent and len(cleaned_evidence) == 0 and status == "success":
+        requires_evidence = bool(result.get("requires_evidence", True))
+        
+        execution_status = "success" if status in {"success", "clarification_required", "clarification"} else status
+        if status in {"clarification_required", "clarification", "unsupported", "fallback"}:
+            query_answer_status = "clarification_required"
+        elif is_evidence_dependent and len(cleaned_evidence) == 0 and requires_evidence:
             status = "insufficient_evidence"
             result["status"] = "insufficient_evidence"
+            query_answer_status = "insufficient_evidence"
+        elif status == "success":
+            query_answer_status = "PASS"
+        else:
+            query_answer_status = "FAIL"
 
         sources = result.get("sources", ["Deterministic Analytics Engine"])
         retrieval_mode = result.get("retrieval_mode", "structured")
@@ -770,6 +782,10 @@ class QueryService(HybridRAGService):
                 if status == "success"
                 else status
             ),
+
+            "execution_status": execution_status,
+            "query_answer_status": query_answer_status,
+            "query_plan": plan.to_dict() if (plan and hasattr(plan, "to_dict")) else (plan or {}),
 
             "authorized_scope": result.get(
                 "authorized_scope",
@@ -867,6 +883,19 @@ class QueryService(HybridRAGService):
 
             "scope": result.get(
                 "scope"
+            ),
+
+            "group_by": result.get(
+                "group_by"
+            ),
+
+            "time_range": result.get(
+                "time_range"
+            ),
+
+            "requires_evidence": result.get(
+                "requires_evidence",
+                True
             ),
 
             # -------------------------------------------------

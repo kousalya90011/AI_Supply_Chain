@@ -144,7 +144,7 @@ class AnalyticsAdapter:
             t_unit = str(plan.threshold.get("unit", "")).strip()
 
             target_col = None
-            for cand in [plan.metric, "stockout_rate", "days_of_cover", "late_rate", "inventory_units"]:
+            for cand in [plan.metric, "risk_score", "stockout_rate", "days_of_cover", "late_rate", "inventory_units"]:
                 if cand and cand in dataframe.columns:
                     target_col = cand
                     break
@@ -215,10 +215,13 @@ class AnalyticsAdapter:
             dataframe
         )
 
-        evidence = self._build_evidence(
-            records=records,
-            plan=plan,
-        )
+        if plan.metric == "major_risks" and getattr(self, "_cached_major_risks_evidence", None):
+            evidence = list(self._cached_major_risks_evidence)
+        else:
+            evidence = self._build_evidence(
+                records=records,
+                plan=plan,
+            )
 
         resp = {
             "status": "success",
@@ -440,10 +443,19 @@ class AnalyticsAdapter:
                     inventory["product_id"].astype(str).str.upper().isin(allowed_pids)
                 ].copy()
 
-            return self.analyzer.analyze(
+            res = self.analyzer.analyze(
                 inventory=inventory,
                 top_n=None,
             )
+            cond = getattr(plan, "condition", None)
+            is_low = (
+                getattr(plan, "negative_condition", False)
+                or cond == "low_risk"
+                or getattr(plan, "direction", "none") == "ascending"
+            )
+            if is_low:
+                res = res.sort_values(by="stockout_rate", ascending=True)
+            return res
 
                 # ---------------------------------------------------------
         # Product cost
@@ -518,6 +530,19 @@ class AnalyticsAdapter:
                 result = result[
                     result["product_id"].astype(str).str.upper().isin(allowed_pids)
                 ].copy()
+            cond = getattr(plan, "condition", None)
+            is_low = (
+                getattr(plan, "negative_condition", False)
+                or cond == "low_risk"
+                or getattr(plan, "direction", "none") == "ascending"
+            )
+            if is_low:
+                if plan.operation == "filter":
+                    result = result[result["risk_level"].isin(["LOW", "MEDIUM"])].sort_values(by="risk_score", ascending=True)
+                else:
+                    result = result.sort_values(by="risk_score", ascending=True)
+            elif cond == "high_risk" and plan.operation == "filter":
+                result = result[result["risk_level"].isin(["CRITICAL", "HIGH"])].sort_values(by="risk_score", ascending=False)
             return result
 
         # =====================================================
@@ -548,7 +573,9 @@ class AnalyticsAdapter:
                 orders=orders
             )
             cond = getattr(plan, "condition", None)
-            if cond == "low_risk":
+            if cond == "not_high_risk":
+                res_df = res_df[~res_df["risk_level"].isin(["CRITICAL", "HIGH"])].sort_values(by="late_rate", ascending=True)
+            elif cond == "low_risk" or getattr(plan, "negative_condition", False):
                 if plan.operation == "filter":
                     res_df = res_df[res_df["risk_level"].isin(["LOW", "MEDIUM"])].sort_values(by="late_rate", ascending=True)
                 elif plan.direction == "ascending":
@@ -688,11 +715,14 @@ class AnalyticsAdapter:
             MajorRisksAnalyzer,
         ):
             datasets = self._datasets()
-            res = self.analyzer.analyze(datasets=datasets)
+            cond = getattr(plan, "condition", "major") or "major"
+            neg = getattr(plan, "negative_condition", False)
+            res = self.analyzer.analyze(datasets=datasets, condition=cond, negative_condition=neg)
             findings = []
             for domain, data in res.get("findings", {}).items():
                 if isinstance(data, dict):
-                    findings.append({"risk_domain": domain, **data})
+                    findings.append({"risk_domain": domain, "condition": cond, **data})
+            self._cached_major_risks_evidence = res.get("evidence", [])
             return pd.DataFrame(findings)
 
         # =====================================================
@@ -982,6 +1012,14 @@ class AnalyticsAdapter:
                 lvl = record.get("risk_level", "EVALUATED")
                 val = round(float(score), 1) if isinstance(score, (int, float)) else score
                 explanation = f"Product {pid}: risk score {val}, stockout rate {stockout*100:.1f}%, days of cover {doc:.1f}d ({lvl} risk)."
+            elif metric == "stockout_rate":
+                pid = record.get("product_id") or plan.entity_id
+                rate = record.get("stockout_rate", 0.0)
+                zero_days = record.get("zero_inventory_days", 0)
+                total_days = record.get("total_days", 0)
+                avg_inv = record.get("average_inventory", 0.0)
+                val = round(float(rate) * 100, 2) if isinstance(rate, (int, float)) else rate
+                explanation = f"Product {pid}: {val:.2f}% stockout rate ({zero_days} zero-inventory days out of {total_days} total days, average inventory: {avg_inv:.1f} units)."
             elif metric in {"inventory_units", "product_inventory"}:
                 pid = record.get("product_id") or plan.entity_id
                 inv = record.get("inventory_units") or record.get("avg_inventory") or record.get("min_inventory", 0.0)

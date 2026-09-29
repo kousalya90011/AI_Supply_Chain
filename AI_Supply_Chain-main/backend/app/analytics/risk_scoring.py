@@ -38,6 +38,41 @@ def calculate_risk_level(
     return "LOW"
 
 
+# =========================================================================
+# CONFIGURED RISK TAXONOMY & SEVERITY THRESHOLDS
+# =========================================================================
+
+RISK_TAXONOMY = {
+    "CRITICAL": {
+        "min_score": 80.0,
+        "max_score": 100.0,
+        "is_major": True,
+        "description": "Critical severity risk requiring immediate executive mitigation",
+    },
+    "HIGH": {
+        "min_score": 60.0,
+        "max_score": 80.0,
+        "is_major": True,
+        "description": "High severity risk requiring active operational mitigation and dual-sourcing",
+    },
+    "MEDIUM": {
+        "min_score": 30.0,
+        "max_score": 60.0,
+        "is_major": False,
+        "description": "Moderate operational risk / non-major risk requiring periodic monitoring",
+    },
+    "LOW": {
+        "min_score": 0.0,
+        "max_score": 30.0,
+        "is_major": False,
+        "description": "Low / controlled risk within standard operational thresholds",
+    },
+}
+
+MAJOR_RISK_LEVELS = ["CRITICAL", "HIGH"]
+NON_MAJOR_RISK_LEVELS = ["MEDIUM", "LOW"]
+
+
 def supplier_risk_score(
     late_rate: float,
     volume_exposure: float,

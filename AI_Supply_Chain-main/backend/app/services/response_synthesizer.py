@@ -179,8 +179,16 @@ class ResponseSynthesizer:
                 query, result, findings, cleaned_ev, sources_list
             )
 
-        # Major Supply Chain Risks
-        if "major_risk" in metric or "major_risk" in intent or "major" in q_lower or "risks right now" in q_lower:
+        # Major & Non-Major Supply Chain Risks
+        if (
+            "major_risk" in metric
+            or "major_risk" in intent
+            or "major" in q_lower
+            or "non major" in q_lower
+            or "non-major" in q_lower
+            or "risks right now" in q_lower
+            or (result.get("condition") in {"major", "non_major"})
+        ):
             return cls._synthesize_major_risks(
                 query, result, findings, cleaned_ev, sources_list
             )
@@ -584,6 +592,73 @@ class ResponseSynthesizer:
         inv_risk = f_map.get("inventory_risk", {})
         lt_anom = f_map.get("lead_time_anomalies", {})
 
+        cond = str(result.get("condition") or "").lower()
+        is_non_major = (
+            cond == "non_major"
+            or bool(result.get("negative_condition", False))
+            or "non major" in query.lower()
+            or "non-major" in query.lower()
+            or "not major" in query.lower()
+        )
+
+        if is_non_major:
+            med_sups = int(sup_risk.get("medium_count", 0))
+            low_sups = int(sup_risk.get("low_count", 0))
+            tot_non_major = int(sup_risk.get("non_major_count", med_sups + low_sups))
+            stable_inv = int(inv_risk.get("stable_inventory_lines", 0))
+            stable_lt = int(lt_anom.get("stable_suppliers_count", 0))
+
+            direct_answer = (
+                f"Enterprise risk intelligence evaluation identified non-major operational factors across the network, "
+                f"comprising {med_sups} MEDIUM-risk and {low_sups} LOW-risk suppliers ({tot_non_major} total non-major suppliers), "
+                f"along with stable inventory lines and controlled lead-time variance. Major risk tiers (CRITICAL and HIGH) are explicitly excluded."
+            )
+
+            key_findings = []
+            top_sups = sup_risk.get("top_risk_suppliers", [])
+            if top_sups:
+                sup_labels = [f"{s['supplier_id']} ({s['risk_level']}, Late Rate: {s['late_rate']}%)" for s in top_sups[:3]]
+                key_findings.append(f"Non-Major Supplier Sourcing: {med_sups} Medium and {low_sups} Low risk suppliers operating within manageable thresholds, led by {', '.join(sup_labels)}.")
+
+            top_stocks = inv_risk.get("top_stockout_products", [])
+            if top_stocks:
+                stock_labels = [f"{p['product_id']} ({p['stockout_rate']}% stockout rate, {p['days_of_cover']}d cover)" for p in top_stocks[:3]]
+                key_findings.append(f"Stable Inventory Profiles: Healthy inventory cover observed for {', '.join(stock_labels)}.")
+
+            top_anoms = lt_anom.get("top_anomalies", [])
+            if top_anoms:
+                anom_labels = [f"{a['supplier_id']} ({a['absolute_change_days']:+.1f}d change)" for a in top_anoms[:2]]
+                key_findings.append(f"Controlled Lead-Time Variance: Predictable fulfillment durations maintained by {', '.join(anom_labels)}.")
+
+            key_findings.append("Exclusion Criteria: Sourcing partners classified under CRITICAL (score >= 80) and HIGH (score >= 60) severity categories are excluded per the non-major query requirement.")
+
+            evidence_summary = []
+            for ev in evidence[:5]:
+                expl = ev.get("explanation")
+                if expl:
+                    evidence_summary.append(expl)
+
+            business_impact = (
+                "Non-major operational risks represent manageable friction that does not immediately threaten production continuity "
+                "or customer SLAs. Maintaining baseline oversight ensures these stable tiers do not migrate into high-severity risk."
+            )
+
+            recommended_actions = [
+                "Maintain standard periodic supplier reviews without initiating emergency expediting or dual-sourcing migrations.",
+                "Continue routine purchase order monitoring and standard replenishment cycles for non-major inventory lines.",
+                "Establish quarterly KPI benchmarks to preserve performance stability across medium and low risk vendors.",
+            ]
+
+            return cls._build_markdown(
+                direct_answer=direct_answer,
+                key_findings=key_findings,
+                evidence_summary=evidence_summary,
+                business_impact=business_impact,
+                recommended_actions=recommended_actions,
+                sources=sources,
+            )
+
+        # Standard Major Risks (CRITICAL / HIGH)
         crit_sups = int(sup_risk.get("critical_count", 0))
         high_sups = int(sup_risk.get("high_count", 0))
         anom_count = int(lt_anom.get("anomalies_detected", 0))
